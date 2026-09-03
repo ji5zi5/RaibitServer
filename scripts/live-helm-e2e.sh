@@ -10,8 +10,11 @@ KIND_NODE_IMAGE="${RAIBITSERVER_LIVE_E2E_KIND_NODE_IMAGE:-kindest/node:v1.35.0@s
 POSTGRES_IMAGE="${RAIBITSERVER_LIVE_E2E_POSTGRES_IMAGE:-postgres:16.14-alpine3.23@sha256:c95dee655b8a0743021bdbd2d21abb7ef2fd520c5df39bd328798769c049648f}"
 CONTROL_PLANE_NAMESPACE="${RAIBITSERVER_LIVE_E2E_NAMESPACE:-raibitserver-system}"
 RELEASE_NAME="${RAIBITSERVER_LIVE_E2E_RELEASE:-live}"
-IMAGE_REGISTRY="raibitserver.local"
-IMAGE_TAG="live-e2e"
+IMAGE_REGISTRY="${RAIBITSERVER_LIVE_E2E_IMAGE_REGISTRY:-raibitserver.local}"
+IMAGE_TAG="${RAIBITSERVER_LIVE_E2E_IMAGE_TAG:-live-e2e}"
+API_PROXY_PORT="${RAIBITSERVER_LIVE_E2E_API_PROXY_PORT:-18081}"
+POSTGRES_PORT_FORWARD_PORT="${RAIBITSERVER_LIVE_E2E_POSTGRES_PORT_FORWARD_PORT:-15432}"
+API_PORT_FORWARD_PORT="${RAIBITSERVER_LIVE_E2E_API_PORT_FORWARD_PORT:-18080}"
 POSTGRES_USER="raibitserver"
 POSTGRES_PASSWORD="raibitserver-live-e2e"
 POSTGRES_DATABASE="raibitserver"
@@ -344,13 +347,13 @@ fi
 echo "[live-e2e] provisioning and authenticating a real managed PostgreSQL resource"
 kubectl --context "${KUBE_CONTEXT}" --namespace "${CONTROL_PLANE_NAMESPACE}" exec -i deployment/postgres -- \
   env "PGPASSWORD=${POSTGRES_PASSWORD}" psql --host=127.0.0.1 --username "${POSTGRES_USER}" \
-    --dbname "${POSTGRES_DATABASE}" --set ON_ERROR_STOP=1 <<'SQL'
+    --dbname "${POSTGRES_DATABASE}" --set ON_ERROR_STOP=1 --set=provider_postgres_image="${POSTGRES_IMAGE}" <<'SQL'
 INSERT INTO "Organization" (id, name, slug, "updatedAt")
 VALUES ('live-provider-org', 'Live Provider Organization', 'live-provider-org', CURRENT_TIMESTAMP);
 INSERT INTO "Project" (id, "organizationId", name, slug, status, "updatedAt")
 VALUES ('live-provider-project', 'live-provider-org', 'Live Provider Project', 'live-provider-project', 'ACTIVE', CURRENT_TIMESTAMP);
 INSERT INTO "Resource" (id, "projectId", name, slug, type, engine, provider, plan, region, status, "desiredSpec", "desiredState", "updatedAt")
-VALUES ('live-postgresql', 'live-provider-project', 'Live PostgreSQL', 'live-postgresql', 'database', 'postgresql', 'raibitserver', 'shared-small', 'local', 'provisioning', '{"databaseName":"live_app","storageGb":1}'::jsonb, '{}'::jsonb, CURRENT_TIMESTAMP);
+VALUES ('live-postgresql', 'live-provider-project', 'Live PostgreSQL', 'live-postgresql', 'database', 'postgresql', 'raibitserver', 'shared-small', 'local', 'provisioning', '{"databaseName":"live_app","storageGb":1}'::jsonb, jsonb_build_object('resourceExecution', jsonb_build_object('intent', 'live-provision', 'environment', 'local', 'image', :'provider_postgres_image')), CURRENT_TIMESTAMP);
 SQL
 
 provider_ready=0
@@ -505,10 +508,10 @@ cat >"${WORK_DIR}/provider-secret-replacement.json" <<EOF
 }
 EOF
 
-kubectl --context "${KUBE_CONTEXT}" proxy --port=18081 >"${WORK_DIR}/kubernetes-api-proxy.log" 2>&1 &
+kubectl --context "${KUBE_CONTEXT}" proxy --port="${API_PROXY_PORT}" >"${WORK_DIR}/kubernetes-api-proxy.log" 2>&1 &
 API_PROXY_PID=$!
 for _ in $(seq 1 30); do
-  if curl --fail --silent --output /dev/null http://127.0.0.1:18081/version; then
+  if curl --fail --silent --output /dev/null "http://127.0.0.1:${API_PROXY_PORT}/version"; then
     break
   fi
   sleep 1
@@ -519,7 +522,7 @@ curl --fail --silent --show-error --output /dev/null \
   --header "Content-Type: application/json" \
   --header "Impersonate-User: ${PROVISIONER_USER}" \
   --data-binary @"${WORK_DIR}/provider-secret-delete.json" \
-  "http://127.0.0.1:18081/api/v1/namespaces/${PROVIDER_TENANT_NAMESPACE}/secrets/${PROVIDER_SECRET}"
+  "http://127.0.0.1:${API_PROXY_PORT}/api/v1/namespaces/${PROVIDER_TENANT_NAMESPACE}/secrets/${PROVIDER_SECRET}"
 kubectl --context "${KUBE_CONTEXT}" --namespace "${PROVIDER_TENANT_NAMESPACE}" wait \
   --for=delete "secret/${PROVIDER_SECRET}" --timeout=60s
 curl --fail --silent --show-error --output /dev/null \
@@ -527,7 +530,7 @@ curl --fail --silent --show-error --output /dev/null \
   --header "Content-Type: application/json" \
   --header "Impersonate-User: ${PROVISIONER_USER}" \
   --data-binary @"${WORK_DIR}/provider-secret-replacement.json" \
-  "http://127.0.0.1:18081/api/v1/namespaces/${PROVIDER_TENANT_NAMESPACE}/secrets"
+  "http://127.0.0.1:${API_PROXY_PORT}/api/v1/namespaces/${PROVIDER_TENANT_NAMESPACE}/secrets"
 REPLACEMENT_PROVIDER_SECRET_UID="$(kubectl --context "${KUBE_CONTEXT}" --namespace "${PROVIDER_TENANT_NAMESPACE}" get secret "${PROVIDER_SECRET}" --output jsonpath='{.metadata.uid}')"
 if [[ -z "${REPLACEMENT_PROVIDER_SECRET_UID}" || "${REPLACEMENT_PROVIDER_SECRET_UID}" == "${LIVE_PROVIDER_SECRET_UID}" ]]; then
   echo "credential replacement did not produce a distinct Kubernetes UID" >&2
@@ -563,11 +566,11 @@ fi
 
 echo "[live-e2e] verifying PostgreSQL controller lease and recovery precision"
 kubectl --context "${KUBE_CONTEXT}" --namespace "${CONTROL_PLANE_NAMESPACE}" port-forward \
-  deployment/postgres 15432:5432 >"${WORK_DIR}/postgres-port-forward.log" 2>&1 &
+  deployment/postgres "${POSTGRES_PORT_FORWARD_PORT}:5432" >"${WORK_DIR}/postgres-port-forward.log" 2>&1 &
 POSTGRES_PORT_FORWARD_PID=$!
 postgres_forward_ready=0
 for _ in $(seq 1 30); do
-  if (exec 3<>/dev/tcp/127.0.0.1/15432) 2>/dev/null; then
+  if (exec 3<>"/dev/tcp/127.0.0.1/${POSTGRES_PORT_FORWARD_PORT}") 2>/dev/null; then
     postgres_forward_ready=1
     break
   fi
@@ -583,17 +586,17 @@ if [[ "${postgres_forward_ready}" -ne 1 ]]; then
 fi
 (
   cd services/orchestrator
-  RAIBITSERVER_TEST_POSTGRES_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:15432/${POSTGRES_DATABASE}?sslmode=disable" \
+  RAIBITSERVER_TEST_POSTGRES_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT_FORWARD_PORT}/${POSTGRES_DATABASE}?sslmode=disable" \
     go test -count=1 -run '^TestPostgresDeletionLeaseUsesStoredTimestamp$' ./internal/store
 )
 (
   cd services/builder
-  RAIBITSERVER_TEST_POSTGRES_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:15432/${POSTGRES_DATABASE}?sslmode=disable" \
+  RAIBITSERVER_TEST_POSTGRES_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT_FORWARD_PORT}/${POSTGRES_DATABASE}?sslmode=disable" \
     go test -count=1 -run '^TestPostgresClaimReapsExpiredExhaustedBuild$' ./internal/controlplane
 )
 (
   cd services/provisioner
-  RAIBITSERVER_TEST_POSTGRES_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:15432/${POSTGRES_DATABASE}?sslmode=disable" \
+  RAIBITSERVER_TEST_POSTGRES_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT_FORWARD_PORT}/${POSTGRES_DATABASE}?sslmode=disable" \
     go test -count=1 -run '^TestPostgresReadyProviderReplacementTransitionsToFailed$' ./internal/reconciler
 )
 kill "${POSTGRES_PORT_FORWARD_PID}" >/dev/null 2>&1 || true
@@ -601,11 +604,11 @@ wait "${POSTGRES_PORT_FORWARD_PID}" 2>/dev/null || true
 POSTGRES_PORT_FORWARD_PID=""
 
 kubectl --context "${KUBE_CONTEXT}" --namespace "${CONTROL_PLANE_NAMESPACE}" port-forward \
-  "service/${API_SERVICE}" 18080:3000 >"${WORK_DIR}/api-port-forward.log" 2>&1 &
+  "service/${API_SERVICE}" "${API_PORT_FORWARD_PORT}:3000" >"${WORK_DIR}/api-port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
 health_response=""
 for _ in $(seq 1 60); do
-  if health_response="$(curl --fail --silent --show-error http://127.0.0.1:18080/api/health 2>/dev/null)"; then
+  if health_response="$(curl --fail --silent --show-error "http://127.0.0.1:${API_PORT_FORWARD_PORT}/api/health" 2>/dev/null)"; then
     break
   fi
   sleep 1

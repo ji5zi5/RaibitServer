@@ -1281,7 +1281,8 @@ export class PrismaControlPlaneRepository {
         delete safeUpdates.name;
         delete safeUpdates.slug;
       }
-      const row = await tx.resource.update({ where: { id: resourceId }, data: resourceData({ ...current, ...safeUpdates, projectId: current.projectId, name: safeUpdates.name || current.name }, { connectionSecretName: current.connectionSecretName || null, baseDesiredSpec: current.desiredSpec || {}, currentDesiredState: current.desiredState || {} }) });
+      const { desiredSpec: baseDesiredSpec, ...currentInput } = current;
+      const row = await tx.resource.update({ where: { id: resourceId }, data: resourceData({ ...currentInput, ...safeUpdates, projectId: current.projectId, name: safeUpdates.name || current.name }, { connectionSecretName: current.connectionSecretName || null, baseDesiredSpec: baseDesiredSpec || {}, currentDesiredState: current.desiredState || {} }) });
       await tx.auditLog.create({ data: { actorUserId: null, action: 'resource:update', targetType: 'resource', targetId: resourceId, metadata: maskSecrets(updates) } });
       return row;
     }, { isolationLevel: 'Serializable' });

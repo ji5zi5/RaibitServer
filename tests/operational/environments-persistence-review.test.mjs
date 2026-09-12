@@ -267,3 +267,67 @@ test('H1 project admission propagates default-prod write failure before returnin
   assert.equal(calls.at(-1).operation, 'environment-upsert');
   assert.equal(calls.filter(call => call.operation === 'transaction-start').length, 1);
 });
+
+async function resourceSizeFixture(adapter) {
+  if (adapter === 'memory') {
+    const { repository, project, dev } = await fixture();
+    const resource = await repository.createResource({ projectId: project.id, environmentId: dev.id, name: 'database', engine: 'postgresql', provider: 'local', storageMb: 1024, databaseName: 'kept_database' });
+    return { repository, resource, stored: () => repository.store.resources.get(resource.id) };
+  }
+  // Recorded native shape: capacity is nested, not a top-level Resource column.
+  // This boundary captures commands/data only; it is not a native database test.
+  const binding = { resourceId: 'resource-size-fixture', projectId: 'project-size-fixture', environmentId: 'env-dev-size-fixture', logicalSlug: 'database', displayName: 'database', environment: { id: 'env-dev-size-fixture', projectId: 'project-size-fixture', kind: 'dev' } };
+  let row = { id: binding.resourceId, projectId: binding.projectId, name: 'dev-physical-database', slug: 'dev-physical-database', type: 'database', engine: 'postgresql', provider: 'local', plan: 'shared-small', region: 'local', version: '16', status: 'provisioning', desiredSpec: { storageMb: 1024, databaseName: 'kept_database' }, desiredState: { storageMb: 1024, desiredSpec: { storageMb: 1024, databaseName: 'kept_database' } }, connectionSecretName: null, environmentBinding: binding };
+  const commands = [];
+  const tx = {
+    async $executeRawUnsafe(sql) { commands.push({ operation: 'protocol', sql }); },
+    project: { async findUnique() { return { id: row.projectId, status: 'ACTIVE' }; } },
+    resource: {
+      async findUnique() { return structuredClone(row); },
+      async update(input) { commands.push({ operation: 'resource-update', input }); row = { ...row, ...input.data }; return row; },
+    },
+    environmentResource: { async update(input) { commands.push({ operation: 'binding-update', input }); Object.assign(binding, input.data); } },
+    auditLog: { async create(input) { commands.push({ operation: 'audit', input }); } },
+  };
+  const repository = new PrismaControlPlaneRepository({ resource: tx.resource, async $transaction(work) { return work(tx); } });
+  return { repository, resource: { ...row, environmentId: binding.environmentId }, stored: () => row, commands };
+}
+
+const resourceSizePatches = [
+  ['top-level MB', { storageMb: 2048 }, 2048],
+  ['top-level GB', { storageGb: 2 }, 2048],
+  ['nested MB', { desiredSpec: { storageMb: 2048 } }, 2048],
+  ['nested GB', { desiredSpec: { storageGb: 2 } }, 2048],
+  ['matching caller aliases', { storageMb: 2048, storageGb: 2, desiredSpec: { storageGb: 2 } }, 2048],
+  ['no capacity field', {}, 1024],
+];
+
+for (const adapter of ['prisma-command', 'memory']) {
+  for (const [label, patch, expectedMb] of resourceSizePatches) test(`resource-size ${adapter} partial update: ${label}`, async () => {
+    // Given old canonical capacity and unrelated desired configuration.
+    const { repository, resource, stored, commands } = await resourceSizeFixture(adapter);
+    const original = structuredClone(stored());
+    // When the real repository normalizes a partial caller patch.
+    const result = await repository.updateResource(resource.id, { name: 'Database renamed', ...patch });
+    // Then only caller capacity overrides the base; physical/binding identity survives.
+    assert.deepEqual(result.desiredSpec, { storageMb: expectedMb, databaseName: 'kept_database' });
+    assert.deepEqual(stored().desiredState.desiredSpec, result.desiredSpec);
+    assert.equal(result.name, 'Database renamed');
+    assert.equal(result.slug, 'database');
+    assert.equal(result.environmentId, resource.environmentId);
+    for (const key of ['id', 'projectId', 'slug', 'name', 'engine', 'provider', 'plan', 'region', 'version', 'status']) assert.equal(stored()[key], original[key], key);
+    if (commands) {
+      assert.equal(commands.filter(command => command.operation === 'resource-update').length, 1);
+      assert.equal(commands.find(command => command.operation === 'protocol').sql, "SET LOCAL raibitserver.operational_protocol = '2'");
+    }
+  });
+  for (const patch of [{ storageMb: 2048, storageGb: 1 }, { storageMb: 2048, desiredSpec: { storageMb: 1024 } }, { desiredSpec: { storageMb: 2048, storageGb: 1 } }]) test(`resource-size ${adapter} rejects explicit caller conflict ${JSON.stringify(patch)}`, async () => {
+    // Given a valid stored resource, with conflicting values supplied together.
+    const { repository, resource, stored, commands } = await resourceSizeFixture(adapter);
+    const original = structuredClone(stored());
+    // When the real normalizer receives that request, then no resource update is admitted.
+    await assert.rejects(repository.updateResource(resource.id, patch), error => error.statusCode === 400 && error.message === 'storageMb and storageGb values conflict');
+    assert.deepEqual(stored(), original);
+    if (commands) assert.equal(commands.filter(command => command.operation === 'resource-update').length, 0);
+  });
+}

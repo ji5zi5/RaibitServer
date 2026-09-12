@@ -67,7 +67,20 @@ kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s create namespace "${CO
 
 timeout 60s helm template "${RELEASE_NAME}" infra/helm/raibitserver \
   --namespace "${CONTROL_NAMESPACE}" --show-only templates/worker-security.yaml >"${EVIDENCE_DIR}/worker-security.yaml"
-test "$(grep -Fc 'oldObject.spec.ttlSecondsAfterFinished == 600' "${EVIDENCE_DIR}/worker-security.yaml")" -eq 1
+recovery_job_policy="$(awk -v policy_name="${FULLNAME}-provisioner-recovery-jobs" '
+  $0 == "---" { capture = 0 }
+  $0 == "  name: " policy_name { capture = 1 }
+  capture { print }
+' "${EVIDENCE_DIR}/worker-security.yaml")"
+if [[ "$(grep -Fc 'oldObject.spec.ttlSecondsAfterFinished == 600' <<<"${recovery_job_policy}")" -ne 2 ]] ||
+  ! grep -Fq "request.operation == 'DELETE' &&" <<<"${recovery_job_policy}" ||
+  ! grep -Fq "request.operation != 'UPDATE' ||" <<<"${recovery_job_policy}" ||
+  ! grep -Fq 'has(oldObject.metadata.deletionTimestamp)' <<<"${recovery_job_policy}" ||
+  ! grep -Fq "foregroundDeletion" <<<"${recovery_job_policy}" ||
+  ! grep -Fq 'object.spec == oldObject.spec && object.status == oldObject.status' <<<"${recovery_job_policy}"; then
+  echo "rendered recovery Jobs policy must retain exact native TTL DELETE and foreground GC UPDATE guards" >&2
+  exit 1
+fi
 kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s apply -f "${EVIDENCE_DIR}/worker-security.yaml"
 
 kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s create namespace "${TENANT_NAMESPACE}"
@@ -167,8 +180,8 @@ jq -e --arg uid "${job_uid}" '
   (.metadata | has("deletionTimestamp")) == false
 ' "${EVIDENCE_DIR}/pre-ttl-dependent-pod.json" >/dev/null
 kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" patch job "${job_name}" \
-  --subresource=status --type=merge -p "{\"status\":{\"startTime\":\"${started_at}\",\"completionTime\":\"${finished_at}\",\"succeeded\":1,\"conditions\":[{\"type\":\"SuccessCriteriaMet\",\"status\":\"True\",\"lastTransitionTime\":\"${finished_at}\",\"reason\":\"NativeTTLProbe\"},{\"type\":\"Complete\",\"status\":\"True\",\"lastTransitionTime\":\"${finished_at}\",\"reason\":\"NativeTTLProbe\"}]}}"
-kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get job "${job_name}" -o json >"${EVIDENCE_DIR}/terminal-job.json"
+  --subresource=status --type=merge -p "{\"status\":{\"startTime\":\"${started_at}\",\"completionTime\":\"${finished_at}\",\"succeeded\":1,\"conditions\":[{\"type\":\"SuccessCriteriaMet\",\"status\":\"True\",\"lastTransitionTime\":\"${finished_at}\",\"reason\":\"NativeTTLProbe\"},{\"type\":\"Complete\",\"status\":\"True\",\"lastTransitionTime\":\"${finished_at}\",\"reason\":\"NativeTTLProbe\"}]}}" \
+  -o json >"${EVIDENCE_DIR}/terminal-job.json"
 jq -e --arg started "${started_at}" --arg finished "${finished_at}" '
   .status.startTime == $started and .status.completionTime == $finished and .status.succeeded == 1 and
   (.status.conditions | any(.type == "SuccessCriteriaMet" and .status == "True")) and

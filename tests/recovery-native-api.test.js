@@ -36,8 +36,17 @@ test('native recovery API gate submits generated policy and requires real TTL de
   assert.match(script, /SuccessCriteriaMet/);
   assert.match(script, /startTime/);
   assert.match(script, /jq -e --arg started[\s\S]*terminal-job\.json/);
-  assert.match(script, /ttlSecondsAfterFinished == 600/);
+  assert.match(script, /recovery_job_policy="\$\(awk -v policy_name="\$\{FULLNAME\}-provisioner-recovery-jobs"/);
+  assert.match(script, /grep -Fc 'oldObject\.spec\.ttlSecondsAfterFinished == 600' <<<"\$\{recovery_job_policy\}"\)" -ne 2/);
+  assert.match(script, /request\.operation == 'DELETE' &&/);
+  assert.match(script, /request\.operation != 'UPDATE' \|\|/);
+  assert.match(script, /has\(oldObject\.metadata\.deletionTimestamp\)/);
+  assert.match(script, /foregroundDeletion/);
+  assert.match(script, /object\.spec == oldObject\.spec && object\.status == oldObject\.status/);
+  assert.doesNotMatch(script, /grep -Fc 'oldObject\.spec\.ttlSecondsAfterFinished == 600' "\$\{EVIDENCE_DIR\}\/worker-security\.yaml"\)" -eq 1/);
   assert.match(script, /11 minutes ago/);
+  assert.match(script, /patch job "\$\{job_name\}"[\s\S]*--subresource=status[\s\S]*-o json >"\$\{EVIDENCE_DIR\}\/terminal-job\.json"/);
+  assert.doesNotMatch(script, /patch job "\$\{job_name\}"[\s\S]*?\n.*get job "\$\{job_name\}" -o json >"\$\{EVIDENCE_DIR\}\/terminal-job\.json"/);
   assert.match(script, /wait --for=delete "job\/\$\{job_name\}" --timeout=120s/);
   assert.match(script, /ownerReferences:[\s\S]*uid: \$\{job_uid\}/);
   assert.doesNotMatch(script, /controller: true/);

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,8 @@ type fakeRecoveryCommands struct {
 	workloadImage          string
 	workloadGeneration     int64
 	snapshotAlreadyExists  bool
+	snapshotVerifyErr      error
+	snapshotVerifications  int
 	workloadReads          int
 	driftBeforeJob         bool
 	streamErr              error
@@ -79,9 +82,7 @@ func (f *fakeRecoveryCommands) RunSensitiveOutput(ctx context.Context, _ string,
 		}
 		return "kubectl get statefulset", mustJSON(map[string]any{"metadata": map[string]any{"name": provider.Name, "namespace": provider.Namespace, "uid": uid, "generation": generation}, "spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{"app.kubernetes.io/name": provider.Name, "app.kubernetes.io/managed-by": "raibitserver", "raibitserver.io/managed": "true", "raibitserver.io/provider": string(f.job.spec.Connection.Engine()), "raibitserver.io/resource-id": f.job.spec.Connection.ResourceID(), "raibitserver.io/project-id": f.job.spec.Connection.spec.ProjectID}}, "spec": map[string]any{"containers": []any{map[string]any{"image": image}}}}}}), nil
 	case "secret/" + f.job.spec.Connection.spec.Secret.name:
-		ref := f.job.spec.Connection.spec.Secret
-		f.sourceReplaced = true
-		return "kubectl get secret", mustJSON(map[string]any{"metadata": map[string]any{"name": ref.name, "namespace": ref.namespace, "uid": provider.CredentialUID, "resourceVersion": "19", "annotations": map[string]any{"raibitserver.io/credential-generation": provider.CredentialGeneration, "raibitserver.io/credential-owner": "raibitserver-provisioner", "raibitserver.io/resource-id": f.job.spec.Connection.ResourceID(), "raibitserver.io/project-id": f.job.spec.Connection.spec.ProjectID}}, "data": map[string]any{ref.key: base64.StdEncoding.EncodeToString([]byte("old-exact-secret")), "UNRELATED": base64.StdEncoding.EncodeToString([]byte("must-not-copy"))}}), nil
+		return "kubectl get secret", nil, &command.KubernetesAPIError{StatusCode: 403}
 	case "pods":
 		if strings.Contains(strings.Join(args, " "), "job-name=") {
 			return "kubectl get pods", mustJSON(map[string]any{"items": f.recoveryJobPods()}), nil
@@ -104,9 +105,7 @@ func (f *fakeRecoveryCommands) RunSensitiveOutput(ctx context.Context, _ string,
 			return "kubectl get pod", mustJSON(f.providerPod("32", f.authorityValue)), nil
 		}
 		if strings.HasPrefix(args[1], "secret/recovery-credential-") {
-			ref := f.job.spec.Connection.spec.Secret
-			provider := f.job.spec.Connection.spec.Provenance.spec
-			return "kubectl get secret", mustJSON(map[string]any{"metadata": map[string]any{"name": strings.TrimPrefix(args[1], "secret/"), "namespace": ref.namespace, "uid": "snapshot-uid", "resourceVersion": "20", "labels": expectedJobLabels(f.job), "annotations": map[string]any{"raibitserver.io/source-secret-uid": provider.CredentialUID, "raibitserver.io/source-secret-resource-version": "19", "raibitserver.io/source-secret-key": ref.key}}, "immutable": true, "data": map[string]any{ref.key: base64.StdEncoding.EncodeToString([]byte("old-exact-secret"))}}), nil
+			return "kubectl get secret", nil, &command.KubernetesAPIError{StatusCode: 403}
 		}
 		if strings.HasPrefix(args[1], "job/") {
 			manifest := f.created[len(f.created)-1]
@@ -127,6 +126,45 @@ func (f *fakeRecoveryCommands) RunSensitiveOutput(ctx context.Context, _ string,
 		}
 	}
 	return "", nil, fmt.Errorf("unexpected get: %v", args)
+}
+
+func (f *fakeRecoveryCommands) InspectSecretJSON(ctx context.Context, namespace, name string, _ time.Duration) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ref := f.job.spec.Connection.spec.Secret
+	if namespace != ref.namespace || name != ref.name {
+		return nil, ErrRecoveryJob
+	}
+	provider := f.job.spec.Connection.spec.Provenance.spec
+	f.sourceReplaced = true
+	return mustJSON(map[string]any{"metadata": map[string]any{"name": ref.name, "namespace": ref.namespace, "uid": provider.CredentialUID, "resourceVersion": "19", "annotations": map[string]any{"raibitserver.io/credential-generation": provider.CredentialGeneration, "raibitserver.io/credential-owner": "raibitserver-provisioner", "raibitserver.io/resource-id": f.job.spec.Connection.ResourceID(), "raibitserver.io/project-id": f.job.spec.Connection.spec.ProjectID}}, "data": map[string]any{ref.key: base64.StdEncoding.EncodeToString([]byte("old-exact-secret")), "UNRELATED": base64.StdEncoding.EncodeToString([]byte("must-not-copy"))}}), nil
+}
+
+func (f *fakeRecoveryCommands) VerifySecretSnapshot(_ context.Context, expected command.SecretSnapshot, _ time.Duration) (string, error) {
+	f.snapshotVerifications++
+	ref := f.job.spec.Connection.spec.Secret
+	provider := f.job.spec.Connection.spec.Provenance.spec
+	if expected.Metadata.Name != recoveryObjectNames(f.job).snapshot || expected.Metadata.Namespace != ref.namespace ||
+		!reflect.DeepEqual(expected.Metadata.Labels, expectedJobLabels(f.job)) ||
+		!reflect.DeepEqual(expected.Metadata.Annotations, map[string]string{"raibitserver.io/source-secret-uid": provider.CredentialUID, "raibitserver.io/source-secret-resource-version": "19", "raibitserver.io/source-secret-key": ref.key}) ||
+		!reflect.DeepEqual(expected.Data, map[string]string{ref.key: base64.StdEncoding.EncodeToString([]byte("old-exact-secret"))}) {
+		return "", ErrRecoveryJob
+	}
+	if f.snapshotVerifyErr != nil {
+		return "", f.snapshotVerifyErr
+	}
+	return "snapshot-uid", nil
+}
+
+func (f *fakeRecoveryCommands) GetSecretMetadata(ctx context.Context, namespace, name string, _ time.Duration) (string, *command.SecretMetadata, error) {
+	if err := ctx.Err(); err != nil {
+		return "metadata patch", nil, err
+	}
+	if namespace != f.job.spec.Namespace || name != recoveryObjectNames(f.job).snapshot {
+		return "metadata patch", nil, ErrRecoveryJob
+	}
+	return "metadata patch", &command.SecretMetadata{Name: name, Namespace: namespace, UID: "snapshot-uid", Labels: expectedJobLabels(f.job)}, nil
 }
 
 func Test_CommandKubernetesJobClient_rejects_changed_provider_before_any_create(t *testing.T) {

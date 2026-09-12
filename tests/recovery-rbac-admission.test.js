@@ -72,6 +72,9 @@ function allowsAuthorityPatch(namespace, before, after) {
 }
 
 function generatedRecoveryPolicy() {
+  if (process.env.RAIBIT_RECOVERY_FIXTURE) {
+    return JSON.parse(readFileSync(process.env.RAIBIT_RECOVERY_FIXTURE, 'utf8')).policy;
+  }
   const go = process.env.RAIBIT_GO || 'go';
   const result = spawnSync(go, ['test', './internal/backup', '-run', '^Test_RecoveryNetworkPolicyManifest_emits_admission_fixture$', '-count=1', '-v'], {
     cwd: 'services/provisioner', encoding: 'utf8', windowsHide: true,

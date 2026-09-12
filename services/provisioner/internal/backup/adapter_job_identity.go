@@ -2,10 +2,14 @@ package backup
 
 import (
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
+	"strings"
 )
+
+const recoverySpecIdentityKey = "raibitserver.io/spec-identity"
 
 type jobIdentityStep struct {
 	Executable string
@@ -62,12 +66,21 @@ func isolatedJobIdentity(job IsolatedJob) string {
 
 func (j IsolatedJob) Identity() string { return isolatedJobIdentity(j) }
 
+func recoveryIdentityLabel(identity string) string {
+	encoded, canonical := strings.CutPrefix(identity, "recovery-job/v1:sha256:")
+	digest, err := hex.DecodeString(encoded)
+	if !canonical || err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != encoded {
+		return ""
+	}
+	return "rj1-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(digest))
+}
+
 func expectedJobLabels(job IsolatedJob) map[string]string {
 	return map[string]string{
-		"raibitserver.io/owned-by":      "recovery",
-		"raibitserver.io/operation":     job.fence.operationID,
-		"raibitserver.io/resource":      job.spec.Connection.ResourceID(),
-		"raibitserver.io/attempt":       strconv.Itoa(job.fence.attempt),
-		"raibitserver.io/spec-identity": isolatedJobIdentity(job),
+		"raibitserver.io/owned-by":  "recovery",
+		"raibitserver.io/operation": job.fence.operationID,
+		"raibitserver.io/resource":  job.spec.Connection.ResourceID(),
+		"raibitserver.io/attempt":   strconv.Itoa(job.fence.attempt),
+		recoverySpecIdentityKey:     recoveryIdentityLabel(job.Identity()),
 	}
 }

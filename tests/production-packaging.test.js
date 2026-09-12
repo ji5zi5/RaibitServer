@@ -253,7 +253,7 @@ test('production provisioner wires digest-pinned providers behind tenant-scoped 
   const tenantRole = workerSecurity.slice(tenantRoleStart, tenantRoleEnd);
   const tenantSecretRule = tenantRole.match(/resources: \["secrets"\][\s\S]{0,240}?verbs: \[([^\]]+)\]/)?.[1] ?? '';
   assert.ok(tenantSecretRule, 'tenant Secret RBAC rule must exist');
-  assert.match(tenantSecretRule, /^"get", "create", "patch", "delete"$/, 'credential Secret crash recovery needs a fenced source read plus dry-run metadata patch, create, and delete');
+  assert.match(tenantSecretRule, /^"create", "patch", "delete"$/, 'provider and recovery inspection retain admission-checked PATCH; Secret GET stays denied');
   for (const forbiddenVerb of ['list', 'watch', 'update']) {
     assert.doesNotMatch(tenantSecretRule, new RegExp(`"${forbiddenVerb}"`), `tenant Secret RBAC must not grant ${forbiddenVerb}`);
   }
@@ -303,7 +303,7 @@ test('production provisioner wires digest-pinned providers behind tenant-scoped 
     assert.match(verifier, new RegExp(renderedContract), `Helm verifier must inspect ${renderedContract}`);
   }
   assert.match(verifier, /provisioner RBAC must not grant pod exec/);
-  assert.match(verifier, /provisioner tenant Secret RBAC must grant only get, create, dry-run metadata patch, and delete/);
+  assert.match(verifier, /provisioner tenant Secret RBAC must grant only create, dry-run inspection patch, and delete/);
 });
 
 test('orchestrator cluster authority is admission-confined to compiler-owned application tenants', async () => {

@@ -163,10 +163,10 @@ if ! awk '
   /^---$/ { tenant = 0; secret = 0 }
   /^  name: raibitserver-provisioner-tenant$/ { tenant = 1 }
   tenant && /resources: \["secrets"\]/ { secret = 1 }
-  tenant && secret && /verbs:/ { found = 1; if ($0 !~ /verbs: \["get", "create", "patch", "delete"\]/) exit 1; secret = 0 }
+  tenant && secret && /verbs:/ { found = 1; if ($0 !~ /verbs: \["create", "patch", "delete"\]/) exit 1; secret = 0 }
   END { if (!found) exit 2 }
 ' "$OUTPUT_DIR/production.yaml"; then
-  echo "provisioner tenant Secret RBAC must grant only get, create, dry-run metadata patch, and delete" >&2
+  echo "provisioner tenant Secret RBAC must grant only create, dry-run inspection patch, and delete; get/list/watch remain denied" >&2
   exit 1
 fi
 if ! awk '
@@ -355,4 +355,5 @@ expect_render_failure missing-observability-database-egress --set-json 'observab
 expect_render_failure missing-storage-bound --set-string builder.ephemeralStorage.builderLimit=
 expect_render_failure invalid-storage-bound --set-string builder.ephemeralStorage.builderLimit=0Gi
 
-echo "Helm default/production renders and production fail-closed cases passed"
+sh "$ROOT_DIR/scripts/verify-provisioner-admission.sh" "$OUTPUT_DIR/default.yaml" "$OUTPUT_DIR/production.yaml"
+echo "Helm default/production renders, production fail-closed cases, and provisioner CEL boundary passed"

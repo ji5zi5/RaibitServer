@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -63,7 +64,8 @@ func Test_RecoveryNetworkPolicyManifest_emits_admission_fixture(t *testing.T) {
 	job := testRecoveryJobForEngine(t, EnginePostgreSQL, 5432)
 
 	// When: the real producer renders and serializes its NetworkPolicy.
-	manifest := recoveryNetworkPolicyManifest(job, "recovery-egress-operation-1-2", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	names := recoveryObjectNames(job)
+	manifest := recoveryNetworkPolicyManifest(job, names.policy, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	payload, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -71,6 +73,35 @@ func Test_RecoveryNetworkPolicyManifest_emits_admission_fixture(t *testing.T) {
 
 	// Then: expose the exact generated object to the cross-file Node admission model.
 	t.Logf("ADMISSION_FIXTURE=%s", payload)
+	source := kubernetesSecret{Data: map[string]string{job.spec.Connection.spec.Secret.key: base64.StdEncoding.EncodeToString([]byte("fixture-only"))}}
+	source.Metadata.UID, source.Metadata.ResourceVersion = "source-uid", "19"
+	snapshot, err := recoveryCredentialSnapshot(job, source, names.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobManifest, _, err := recoveryJobManifest(job, names.job, names.snapshot, "snapshot-uid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, err := NewIsolatedJob(testJobSpec(t, job.spec.Connection, StreamStdin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreNames := recoveryObjectNames(restore)
+	restoreSnapshot, err := recoveryCredentialSnapshot(restore, source, restoreNames.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreManifest, _, err := recoveryJobManifest(restore, restoreNames.job, restoreNames.snapshot, "snapshot-uid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundaryPayload, err := json.Marshal(map[string]any{"policy": manifest, "snapshot": snapshot, "job": jobManifest,
+		"restore": map[string]any{"policy": recoveryNetworkPolicyManifest(restore, restoreNames.policy, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "snapshot": restoreSnapshot, "job": restoreManifest}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("BOUNDARY_FIXTURE=%s", boundaryPayload)
 }
 
 func Test_RecoveryJobManifest_rejects_noncanonical_engine_port(t *testing.T) {

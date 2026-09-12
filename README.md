@@ -395,7 +395,8 @@ private 저장소 빌드용 App ID와 RSA private key는 API 환경변수에 넣
 - platform component는 `raibitserver-system` 같은 전용 namespace에 두고, 사용자 workload는 조직/프로젝트별 namespace로 분리합니다.
 - tenant workload에는 restricted Pod Security, non-root 실행, resource requests/limits, Secret ref, NetworkPolicy를 적용합니다.
 - TypeScript control plane의 provider 엔드포인트는 계획만 만들며 자격 증명이나 placeholder Secret을 쓰지 않습니다. authoritative Go provisioner만 암호학적 난수 자격 증명을 생성해 stdin으로 immutable Kubernetes Secret을 최초 1회 생성합니다. 재시도는 Secret을 읽지 않고 server-side create의 `AlreadyExists`만 확인하며, 기존 workload의 Secret이 사라졌다면 credential을 재생성하지 않습니다. workload에는 허용 key별 `secretKeyRef`만 주입하고 kubelet이 공개 connection contract와 실제 인증을 검사합니다. control-plane DB에는 Secret 이름·허용 환경변수 키·내부 endpoint 같은 공개 메타데이터만 기록하며 READY 리소스도 주기적으로 재검증합니다.
-- provisioner는 cluster-wide `pods/exec`와 Secret read 권한을 갖지 않습니다. managed namespace와 제한된 tenant RoleBinding만 bootstrap하고, provider object CRUD는 해당 namespace의 tenant role로 수행합니다. admission policy가 unmanaged namespace 채택, 다른 ClusterRole/ServiceAccount 바인딩, ownership label이 없는 provider object 변경을 거부합니다.
+- provisioner는 cluster-wide `pods/exec` 및 Secret `get/list/watch` 권한을 갖지 않습니다. managed namespace와 제한된 tenant RoleBinding만 bootstrap하고, provider object CRUD는 해당 namespace의 tenant role로 수행합니다. 이름 조건과 무관하게 worker 신원으로 적용되는 admission policy가 임의 이름, 다른 소유자의 객체 채택, ownership 변경과 UID 조건 없는 삭제를 거부합니다.
+- 필요한 credential 조회는 소유권과 변경 없음을 admission에서 검사하는 `dryRun=All` PATCH로 수행합니다. provider 재조정은 메타데이터만, 복구는 허용된 source/target credential을 읽습니다. 기존 복구 snapshot은 보관한 source와 데이터·소유권·출처를 원자적으로 비교한 뒤 UID만 받으며, Secret GET이나 실행별 수동 권한 부여는 사용하지 않습니다. 이전 복구 바이너리는 GET을 사용하므로 controller와 RBAC/admission 변경을 함께 적용해야 합니다. `sh scripts/verify-helm.sh`는 실제 렌더링된 정책의 CEL 회귀도 실행하지만, Kubernetes API 서버의 스키마·defaulting과 실제 백업/복구 검증을 대신하지 않습니다.
 - tenant spec의 `prePullImages`/`runtime.prePullImages`/`performance.prePullImages`는 DaemonSet을 만들지 않습니다. node-wide image warming은 tenant manifest가 아니라 operator-controlled 배포 정책에서만 허용해야 합니다.
 - privileged container, hostPath, hostNetwork, root 실행, quota 초과 배포는 배포 전 차단되어야 합니다.
 - orchestrator service account는 필요한 namespace/resource에만 권한을 주고 cluster-admin 상시 권한은 피합니다.
@@ -427,6 +428,7 @@ DB, Redis, provider credential endpoint는 public internet에 직접 노출하�
 - `/health` 또는 ingress health check, worker backlog, failed workflow, quota violation, GitHub webhook 401/5xx를 모니터링합니다.
 - worker/API 실패는 표준 `errorCode`와 `lastErrorSpec`/deployment event metadata로 남겨 대시보드와 CLI가 같은 사용자 안내 문구와 retry 가능 여부를 표시할 수 있게 합니다.
 - 복구 리허설은 “DB restore → API boot → worker reconcile → 기존 서비스 URL 정상화” 순서로 확인합니다.
+- 복구 리소스의 식별 라벨은 전체 SHA-256을 손실 없이 담은 `rj1-` + 소문자 base32 형식입니다. 기존 canonical identity는 Job annotation에 보존하고 완료 관측 시 라벨과 일치하는지 확인하므로 receipt/API/DB의 식별값은 바뀌지 않습니다.
 
 ### 9. go-live 직전 검증
 

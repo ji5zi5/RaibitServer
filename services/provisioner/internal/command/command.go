@@ -110,64 +110,19 @@ func (*OSRunner) RunStream(ctx context.Context, name string, args []string, inpu
 }
 
 func (r *OSRunner) GetSecretMetadata(ctx context.Context, namespace, secretName string, timeout time.Duration) (string, *SecretMetadata, error) {
-	commandLine := "kubernetes-api patch metadata secret/" + secretName + " --namespace " + namespace + " --dry-run=server"
-	apiPath, err := namespacedResourceAPIPath("secret", strings.TrimSpace(namespace), strings.TrimSpace(secretName))
+	return r.patchSecretMetadata(ctx, namespace, secretName, []byte("[]"), timeout)
+}
+
+func (r *OSRunner) patchSecretMetadata(ctx context.Context, namespace, secretName string, patch []byte, timeout time.Duration) (string, *SecretMetadata, error) {
+	commandLine, payload, err := r.inspectSecret(ctx, secretInspection{namespace: namespace, name: secretName,
+		accept: "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1", patch: patch, maxBytes: 64 << 10}, timeout)
 	if err != nil {
 		return commandLine, nil, err
-	}
-	if timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
-	requestContext, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	apiURL, err := r.kubernetesAPIURL()
-	if err != nil {
-		return commandLine, nil, err
-	}
-	token, err := r.serviceAccountToken()
-	if err != nil {
-		return commandLine, nil, err
-	}
-	endpoint, err := url.Parse(strings.TrimRight(apiURL, "/") + apiPath)
-	if err != nil {
-		return commandLine, nil, fmt.Errorf("create Kubernetes Secret metadata endpoint: %w", err)
-	}
-	query := endpoint.Query()
-	query.Set("dryRun", "All")
-	endpoint.RawQuery = query.Encode()
-	request, err := http.NewRequestWithContext(requestContext, http.MethodPatch, endpoint.String(), bytes.NewReader([]byte("[]")))
-	if err != nil {
-		return commandLine, nil, fmt.Errorf("create Kubernetes Secret metadata request: %w", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("Accept", "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1")
-	request.Header.Set("Content-Type", "application/json-patch+json")
-	client, err := r.kubernetesHTTPClient()
-	if err != nil {
-		return commandLine, nil, err
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return commandLine, nil, fmt.Errorf("execute Kubernetes Secret metadata request: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return commandLine, nil, ErrSecretNotFound
-	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return commandLine, nil, &KubernetesAPIError{StatusCode: response.StatusCode}
 	}
 	var partial struct {
 		APIVersion string          `json:"apiVersion"`
 		Kind       string          `json:"kind"`
 		Metadata   json.RawMessage `json:"metadata"`
-	}
-	const maxMetadataResponseBytes = 64 << 10
-	payload, readErr := io.ReadAll(io.LimitReader(response.Body, maxMetadataResponseBytes+1))
-	if readErr != nil || len(payload) > maxMetadataResponseBytes {
-		return commandLine, nil, errors.New("Kubernetes API returned an invalid-sized metadata-only Secret representation")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()

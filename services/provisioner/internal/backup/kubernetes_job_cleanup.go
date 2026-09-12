@@ -46,12 +46,18 @@ func (c *CommandKubernetesJobClient) cleanup(ctx context.Context, created Create
 
 func (c *CommandKubernetesJobClient) readOwnedObjectUID(ctx context.Context, resource, namespace, name string, labels map[string]string) (string, error) {
 	var observed struct {
-		Metadata struct {
-			Name, Namespace, UID string
-			Labels               map[string]string
-		} `json:"metadata"`
+		Metadata command.SecretMetadata `json:"metadata"`
 	}
-	if err := c.readJSON(ctx, []string{"get", resource + "/" + name, "--namespace", namespace, "-o", "json"}, &observed); err != nil {
+	if resource == "secret" {
+		_, metadata, err := c.runner.GetSecretMetadata(ctx, namespace, name, c.timeout)
+		if errors.Is(err, command.ErrSecretNotFound) {
+			return "", command.ErrObjectNotFound
+		}
+		if err != nil || metadata == nil {
+			return "", errors.Join(ErrRecoveryJob, err)
+		}
+		observed.Metadata = *metadata
+	} else if err := c.readJSON(ctx, []string{"get", resource + "/" + name, "--namespace", namespace, "-o", "json"}, &observed); err != nil {
 		return "", err
 	}
 	if observed.Metadata.Name != name || observed.Metadata.Namespace != namespace || !providerUIDPattern.MatchString(observed.Metadata.UID) {

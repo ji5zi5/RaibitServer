@@ -21,6 +21,9 @@ type recoveryCommandRunner interface {
 	RunCreateInputUID(context.Context, string, []string, []byte, time.Duration) (string, string, error)
 	RunSensitiveOutput(context.Context, string, []string, time.Duration) (string, []byte, error)
 	DeleteObjectUID(context.Context, string, string, string, string, time.Duration) (string, error)
+	InspectSecretJSON(context.Context, string, string, time.Duration) ([]byte, error)
+	GetSecretMetadata(context.Context, string, string, time.Duration) (string, *command.SecretMetadata, error)
+	VerifySecretSnapshot(context.Context, command.SecretSnapshot, time.Duration) (string, error)
 }
 
 type CommandKubernetesJobClient struct {
@@ -85,6 +88,9 @@ func (c *CommandKubernetesJobClient) CreateAuthorizedJob(ctx context.Context, jo
 	}()
 	created.snapshotUID, err = c.createSnapshot(ctx, job, snapshot, secret, names.snapshot, secretRef.key)
 	if err != nil {
+		if errors.Is(err, command.ErrAlreadyExists) {
+			created.snapshotName = ""
+		}
 		return created, err
 	}
 	pod, err := c.readProviderPod(ctx, workload, job)
@@ -153,21 +159,25 @@ func (c *CommandKubernetesJobClient) createSnapshot(ctx context.Context, job Iso
 	if !errors.Is(err, command.ErrAlreadyExists) {
 		return "", err
 	}
-	existing, readErr := c.readSecret(ctx, source.Metadata.Namespace, name)
-	labelsValid := true
-	for label, value := range expectedJobLabels(job) {
-		labelsValid = labelsValid && existing.Metadata.Labels[label] == value
+	uid, err = c.runner.VerifySecretSnapshot(ctx, command.SecretSnapshot{
+		Metadata: command.SecretMetadata{Name: name, Namespace: source.Metadata.Namespace, Labels: expectedJobLabels(job),
+			Annotations: map[string]string{"raibitserver.io/source-secret-uid": source.Metadata.UID,
+				"raibitserver.io/source-secret-resource-version": source.Metadata.ResourceVersion, "raibitserver.io/source-secret-key": key}},
+		Data: map[string]string{key: source.Data[key]},
+	}, c.timeout)
+	if err != nil || !providerUIDPattern.MatchString(uid) {
+		return "", errors.Join(ErrRecoveryJob, command.ErrAlreadyExists, err)
 	}
-	if readErr != nil || !labelsValid || existing.Immutable == nil || !*existing.Immutable || existing.Metadata.UID == "" || existing.Metadata.Annotations["raibitserver.io/source-secret-uid"] != source.Metadata.UID || existing.Metadata.Annotations["raibitserver.io/source-secret-resource-version"] != source.Metadata.ResourceVersion || existing.Metadata.Annotations["raibitserver.io/source-secret-key"] != key || len(existing.Data) != 1 || existing.Data[key] != source.Data[key] {
-		return "", errors.Join(ErrRecoveryJob, readErr)
-	}
-	return existing.Metadata.UID, nil
+	return uid, nil
 }
 
 func (c *CommandKubernetesJobClient) readSecret(ctx context.Context, namespace, name string) (kubernetesSecret, error) {
 	var result kubernetesSecret
-	err := c.readJSON(ctx, []string{"get", "secret/" + name, "--namespace", namespace, "-o", "json"}, &result)
-	return result, err
+	payload, err := c.runner.InspectSecretJSON(ctx, namespace, name, c.timeout)
+	if err != nil || len(payload) == 0 || len(payload) > maxKubernetesObjectBytes || json.Unmarshal(payload, &result) != nil {
+		return result, errors.Join(ErrRecoveryJob, err)
+	}
+	return result, nil
 }
 
 func (c *CommandKubernetesJobClient) readWorkload(ctx context.Context, namespace, name string) (kubernetesWorkload, error) {

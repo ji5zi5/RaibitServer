@@ -113,7 +113,7 @@ func recoveryJobManifest(job IsolatedJob, name, snapshotName, snapshotUID string
 	labels["raibitserver.io/credential-snapshot"] = snapshotName
 	return map[string]any{
 		"apiVersion": "batch/v1", "kind": "Job",
-		"metadata": map[string]any{"name": name, "namespace": job.spec.Namespace, "labels": labels, "annotations": map[string]any{"raibitserver.io/credential-snapshot-uid": snapshotUID, "raibitserver.io/provider-workload-uid": job.spec.Connection.spec.Provenance.spec.UID, "raibitserver.io/provider-workload-generation": strconv.FormatInt(job.spec.Connection.spec.Provenance.spec.Generation, 10)}},
+		"metadata": map[string]any{"name": name, "namespace": job.spec.Namespace, "labels": labels, "annotations": map[string]any{recoverySpecIdentityKey: job.Identity(), "raibitserver.io/credential-snapshot-uid": snapshotUID, "raibitserver.io/provider-workload-uid": job.spec.Connection.spec.Provenance.spec.UID, "raibitserver.io/provider-workload-generation": strconv.FormatInt(job.spec.Connection.spec.Provenance.spec.Generation, 10)}},
 		"spec": map[string]any{"backoffLimit": 0, "activeDeadlineSeconds": int64(job.spec.Deadline / time.Second), "ttlSecondsAfterFinished": 600,
 			"template": map[string]any{"metadata": map[string]any{"labels": labels}, "spec": podSpec}},
 	}, streamStep, nil
@@ -251,10 +251,12 @@ func (o kubernetesJobObservation) referencesSnapshot(name string) bool {
 }
 
 func (o kubernetesJobObservation) completed() (CompletedJobObservation, error) {
-	if len(o.Spec.Template.Spec.Containers) != 1 {
+	identity := o.Metadata.Annotations[recoverySpecIdentityKey]
+	label := recoveryIdentityLabel(identity)
+	if len(o.Spec.Template.Spec.Containers) != 1 || label == "" || o.Metadata.Labels[recoverySpecIdentityKey] != label {
 		return CompletedJobObservation{}, ErrRecoveryJob
 	}
-	return CompletedJobObservation{Name: o.Metadata.Name, UID: o.Metadata.UID, Image: o.Spec.Template.Spec.Containers[0].Image, SpecIdentity: o.Metadata.Labels["raibitserver.io/spec-identity"], Succeeded: o.Status.Succeeded == 1, CompletionTime: o.Status.CompletionTime, Labels: o.Metadata.Labels}, nil
+	return CompletedJobObservation{Name: o.Metadata.Name, UID: o.Metadata.UID, Image: o.Spec.Template.Spec.Containers[0].Image, SpecIdentity: identity, Succeeded: o.Status.Succeeded == 1, CompletionTime: o.Status.CompletionTime, Labels: o.Metadata.Labels}, nil
 }
 
 func stringAny(values []string) []any {

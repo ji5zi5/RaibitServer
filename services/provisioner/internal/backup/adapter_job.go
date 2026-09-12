@@ -204,7 +204,7 @@ func NewIsolatedJob(spec IsolatedJobSpec) (IsolatedJob, error) {
 	security := RuntimeSecurity{runAsUser: spec.RunAsUser, runAsNonRoot: true, readOnlyRootFilesystem: true, dropAllCapabilities: true}
 	scratch := SharedScratch{name: recoveryScratchName, mountPath: recoveryScratchPath, sizeMiB: spec.EphemeralMiB}
 	job := IsolatedJob{spec: spec, security: security, policy: policy, endpoint: endpoint, endpointProjected: endpointProjected, scratch: scratch, labels: labels, fence: fence}
-	job.labels["raibitserver.io/spec-identity"] = isolatedJobIdentity(job)
+	job.labels[recoverySpecIdentityKey] = recoveryIdentityLabel(job.Identity())
 	return job, nil
 }
 

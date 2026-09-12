@@ -189,14 +189,19 @@ func compileEngine(resource *store.Resource, image, engine string) (*Plan, error
 		"raibitserver.io/resource-id":  boundedDNSName(resource.ID, resource.ID, 63),
 		"raibitserver.io/provider":     engine,
 	}
+	for key, value := range environmentLabels(resource) {
+		labels[key] = value
+	}
 	storage := storageSize(resource.DesiredSpec)
 	plan := &Plan{
 		Image:  image,
 		Engine: engine, Provider: "raibitserver-local-" + engine, Name: name, Namespace: namespace,
 		SecretName: secretName, PVCName: pvcName, Endpoint: endpoint, Database: database, User: username, ConnectionKeys: connectionKeys, ProbeCommand: container.ProbeCommand, SecretData: data, Labels: labels,
 	}
+	namespaceManifest := tenantNamespaceManifest(namespace, resource.ProjectID, resource.ProjectSlug)
+	addEnvironmentLabels(namespaceManifest, resource)
 	plan.PublicManifests = []map[string]any{
-		tenantNamespaceManifest(namespace, resource.ProjectID, resource.ProjectSlug),
+		namespaceManifest,
 		persistentVolumeClaim(namespace, pvcName, labels, storage),
 		service(namespace, name, labels, port),
 		statefulSet(namespace, name, labels, image, port, secretName, pvcName, reconcileToken, data, container),
@@ -287,8 +292,10 @@ func TenantBootstrapManifests(resource *store.Resource, serviceAccountName, serv
 	if err != nil {
 		return nil, err
 	}
+	namespaceManifest := tenantNamespaceManifest(namespace, resource.ProjectID, resource.ProjectSlug)
+	addEnvironmentLabels(namespaceManifest, resource)
 	return []map[string]any{
-		tenantNamespaceManifest(namespace, resource.ProjectID, resource.ProjectSlug),
+		namespaceManifest,
 		access,
 	}, nil
 }
@@ -429,6 +436,36 @@ func ObjectNames(resource *store.Resource) (name, namespace, secretName, pvcName
 	if _, err = normalizeEngine(resource.Engine); err != nil {
 		return "", "", "", "", err
 	}
+	environmentKind, err := resourceEnvironmentKind(resource)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	if environmentKind == "dev" {
+		name, err = devResourceName(resource.EnvironmentID, resource.LogicalSlug)
+		if err != nil {
+			return "", "", "", "", err
+		}
+		namespace = devNamespace(resource.EnvironmentID)
+		secretName, pvcName = name+"-connection", name+"-data"
+		if identity, exists := resource.DesiredState["providerIdentity"]; exists {
+			persisted, ok := identity.(map[string]any)
+			if !ok || strings.TrimSpace(stringValue(persisted, "namespace")) != namespace || strings.TrimSpace(stringValue(persisted, "name")) != name {
+				return "", "", "", "", fmt.Errorf("persisted provider object identity conflicts with authoritative dev environment")
+			}
+		}
+		if providerResult, ok := resource.DesiredState["providerResult"].(map[string]any); ok {
+			if persistedNamespace := strings.TrimSpace(stringValue(providerResult, "namespace")); persistedNamespace != "" && persistedNamespace != namespace {
+				return "", "", "", "", fmt.Errorf("persisted provider namespace conflicts with authoritative dev environment")
+			}
+			if persistedName := strings.TrimSpace(stringValue(providerResult, "name")); persistedName != "" && persistedName != name {
+				return "", "", "", "", fmt.Errorf("persisted provider name conflicts with authoritative dev environment")
+			}
+		}
+		if existing := strings.TrimSpace(resource.ConnectionSecretName); existing != "" && existing != secretName {
+			return "", "", "", "", fmt.Errorf("persisted provider credential name conflicts with authoritative dev environment")
+		}
+		return name, namespace, secretName, pvcName, nil
+	}
 	if identity, exists := resource.DesiredState["providerIdentity"]; exists {
 		persisted, ok := identity.(map[string]any)
 		if !ok {
@@ -477,6 +514,61 @@ func ObjectNames(resource *store.Resource) (name, namespace, secretName, pvcName
 		return "", "", "", "", err
 	}
 	return name, namespace, boundedSlug(name+"-connection", 63), boundedSlug(name+"-data", 63), nil
+}
+
+func resourceEnvironmentKind(resource *store.Resource) (string, error) {
+	kind := strings.TrimSpace(resource.EnvironmentKind)
+	environmentID := strings.TrimSpace(resource.EnvironmentID)
+	logicalSlug := strings.TrimSpace(resource.LogicalSlug)
+	if kind == "" && environmentID == "" && logicalSlug == "" {
+		return "prod", nil
+	}
+	if kind != "prod" && kind != "dev" {
+		return "", fmt.Errorf("resource environment kind %q is invalid", resource.EnvironmentKind)
+	}
+	if environmentID == "" || logicalSlug == "" {
+		return "", fmt.Errorf("resource environment identity is incomplete")
+	}
+	return kind, nil
+}
+
+func devNamespace(environmentID string) string {
+	hash := sha256.Sum256([]byte(environmentID))
+	return "rb-dev-" + fmt.Sprintf("%x", hash[:10])
+}
+
+func devResourceName(environmentID, logicalSlug string) (string, error) {
+	logical := boundedSlug(logicalSlug, 37)
+	if logical == "" {
+		return "", fmt.Errorf("resource logical slug is invalid")
+	}
+	hash := sha256.Sum256([]byte(environmentID + ":" + logicalSlug))
+	return "dev-" + fmt.Sprintf("%x", hash[:5]) + "-" + logical, nil
+}
+
+func environmentLabels(resource *store.Resource) map[string]any {
+	if strings.TrimSpace(resource.EnvironmentKind) != "dev" {
+		return nil
+	}
+	return map[string]any{
+		"raibitserver.io/environment-id":   boundedDNSName(resource.EnvironmentID, resource.EnvironmentID, 63),
+		"raibitserver.io/environment-kind": "dev",
+		"raibitserver.io/logical-slug":     boundedDNSName(resource.LogicalSlug, resource.EnvironmentID+":"+resource.LogicalSlug, 63),
+	}
+}
+
+func addEnvironmentLabels(manifest map[string]any, resource *store.Resource) {
+	metadata, ok := manifest["metadata"].(map[string]any)
+	if !ok {
+		return
+	}
+	labels, ok := metadata["labels"].(map[string]any)
+	if !ok {
+		return
+	}
+	for key, value := range environmentLabels(resource) {
+		labels[key] = value
+	}
 }
 
 func validDNSLabel(value string) bool {

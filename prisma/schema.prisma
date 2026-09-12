@@ -220,6 +220,7 @@ model Deployment {
   id                String    @id @default(cuid())
   serviceId         String
   projectId         String
+  environmentId     String?
   sourceDeploymentId String?
   retryOfDeploymentId String?
   requestIdempotencyKey String?
@@ -258,6 +259,7 @@ model Deployment {
   updatedAt         DateTime  @updatedAt
   service           Service   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment       Environment? @relation(fields: [environmentId, projectId], references: [id, projectId], onDelete: Restrict)
   buildLogs         BuildLog[]
   runtimeLogs       RuntimeLog[]
   runtimeMetrics    RuntimeMetric[]
@@ -273,6 +275,7 @@ model Deployment {
   @@index([status, reconcileLockedAt, createdAt])
   @@index([serviceId, createdAt, id])
   @@index([projectId, createdAt, id])
+  @@index([environmentId, createdAt, id])
   @@unique([previewLineageId, previewGeneration])
   @@unique([id, previewLineageId, previewGeneration])
 }
@@ -282,6 +285,7 @@ model PreviewLineage {
   organizationId String
   projectId String
   serviceId String
+  environmentId String?
   integrationId String
   installationId String
   repositoryId String
@@ -315,10 +319,12 @@ model PreviewLineage {
   attempts Deployment[] @relation("PreviewAttempts")
   candidate Deployment? @relation("PreviewCandidate", fields: [candidateDeploymentId, id, candidateGeneration], references: [id, previewLineageId, previewGeneration], onDelete: Restrict)
   current Deployment? @relation("PreviewCurrent", fields: [currentDeploymentId, id, currentGeneration], references: [id, previewLineageId, previewGeneration], onDelete: Restrict)
+  environment Environment? @relation(fields: [environmentId, projectId], references: [id, projectId], onDelete: Restrict)
 
   @@unique([organizationId, projectId, serviceId, installationId, repositoryId, pullRequestNumber], map: "PreviewLineage_identity")
   @@unique([id, projectId, serviceId])
   @@index([state, updatedAt])
+  @@index([environmentId, updatedAt])
 }
 
 model BuildLog {
@@ -785,6 +791,7 @@ model WorkflowJob {
   status      String    @default("queued")
   targetType  String
   targetId    String
+  environmentId String?
   payload     Json
   attempts    Int       @default(0)
   maxAttempts Int       @default(3)
@@ -797,6 +804,7 @@ model WorkflowJob {
 
   @@index([status, runAfter])
   @@index([targetType, targetId])
+  @@index([environmentId, status, runAfter])
 }
 
 model Environment {
@@ -809,6 +817,8 @@ model Environment {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   serviceBindings EnvironmentService[]
   resourceBindings EnvironmentResource[]
+  deployments Deployment[]
+  previewLineages PreviewLineage[]
   templateInstallations TemplateInstallation[]
   promotionSources PromotionPreview[] @relation("PromotionPreviewSource")
   promotionTargets PromotionPreview[] @relation("PromotionPreviewTarget")
@@ -833,6 +843,7 @@ model EnvironmentService {
   environmentId String
   projectId String
   logicalSlug String
+  displayName String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   environment Environment @relation(fields: [environmentId, projectId], references: [id, projectId], onDelete: Cascade)
@@ -848,6 +859,7 @@ model EnvironmentResource {
   environmentId String
   projectId String
   logicalSlug String
+  displayName String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   environment Environment @relation(fields: [environmentId, projectId], references: [id, projectId], onDelete: Cascade)

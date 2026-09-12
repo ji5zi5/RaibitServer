@@ -48,6 +48,8 @@ export { runtimeConfigStatus, assertRuntimeKeys, secretEncryptionConfigured, par
 export { OperationalContractError, assertOperationalWriterReady, notificationSemanticKey, operationalContractDigest, operationalIdentityProjection, parseOperationalFeaturesContract, parseOperationalRuntimeConfig, parseOperationalWriterIntent } from './operational-contract.ts';
 export type { OperationalContractErrorCode, OperationalRuntimeConfig } from './operational-contract.ts';
 export { OPERATIONAL_PROTOCOL_SESSION_SQL, OPERATIONAL_PROTOCOL_VERSION, OperationalPersistenceError, assertOperationalBindingScope, buildOperationalBackfillProjection, productionEnvironmentId, setOperationalProtocolVersion } from './operational-persistence.ts';
+export { ENVIRONMENT_KINDS, EnvironmentError, environmentIdForKind, environmentNamespace, environmentPhysicalSlug, parseEnvironmentSelector, projectRuntimeEnvironment, publicEnvironment, publicEnvironmentSubject } from './environments.ts';
+export type { EnvironmentErrorCode, EnvironmentKind, EnvironmentRecord, EnvironmentSelector, RuntimeEnvironmentProjection } from './environments.ts';
 export type { OperationalBackfillInput, OperationalBackfillProjection, OperationalBindingScope, OperationalPersistenceErrorCode, OperationalSqlExecutor } from './operational-persistence.ts';
 export * from './discord-alerts.ts';
 export { PrismaDiscordAlertsRepository } from './discord-alerts-postgres.ts';

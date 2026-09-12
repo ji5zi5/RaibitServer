@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { once } from 'node:events';
@@ -28,6 +29,8 @@ try {
   tls.listen(0, '127.0.0.1'); await once(tls, 'listening');
   const origin = `https://console.localhost:${tls.address().port}`;
   runtime = await bootOAuthRuntime({ redirectUri: `${origin}/api/control/auth/github/callback` });
+  process.env.RAIBITSERVER_OAUTH_RELAY_SECRET = crypto.randomBytes(32).toString('hex');
+  runtime.secrets.add(process.env.RAIBITSERVER_OAUTH_RELAY_SECRET);
   const reservation = http.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   nextPort = reservation.address().port; await new Promise((resolve) => reservation.close(resolve));
   const nextBin = path.join(dashboard, 'node_modules/next/dist/bin/next');

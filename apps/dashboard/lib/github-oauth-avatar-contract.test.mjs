@@ -15,14 +15,14 @@ const verifier = 'verifier_value_abcdefghijklmnopqrstuvwxyz_0123456789_ABCDEFG';
 const challenge = 'challenge_value_abcdefghijklmnopqrstuvwxyz_123456';
 const redirectUri = 'https://console.raibit.kr/api/control/auth/github/callback';
 
-test('GitHub OAuth transient cookies are host-only, HttpOnly, and callback-scoped', () => {
-  assert.equal(GITHUB_OAUTH_STATE_COOKIE_NAME, 'raibitserver_github_oauth_state');
-  assert.equal(GITHUB_OAUTH_VERIFIER_COOKIE_NAME, 'raibitserver_github_oauth_verifier');
+test('GitHub OAuth transient cookies enforce browser host-prefix isolation against sibling-domain injection', () => {
+  assert.equal(GITHUB_OAUTH_STATE_COOKIE_NAME, '__Host-raibitserver_github_oauth_state');
+  assert.equal(GITHUB_OAUTH_VERIFIER_COOKIE_NAME, '__Host-raibitserver_github_oauth_verifier');
   assert.deepEqual(githubOAuthCookieOptions({ NODE_ENV: 'development' }), {
     httpOnly: true,
     sameSite: 'lax',
     secure: true,
-    path: '/api/control/auth/github/callback',
+    path: '/',
     maxAge: 600,
   });
   assert.equal(githubOAuthCookieOptions({ NODE_ENV: 'production' }).secure, true);

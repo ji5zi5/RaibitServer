@@ -1,7 +1,7 @@
 export const SESSION_COOKIE_NAME = 'raibitserver_session';
 export const GITHUB_INSTALL_STATE_COOKIE_NAME = 'raibitserver_github_install_state';
-export const GITHUB_OAUTH_STATE_COOKIE_NAME = 'raibitserver_github_oauth_state';
-export const GITHUB_OAUTH_VERIFIER_COOKIE_NAME = 'raibitserver_github_oauth_verifier';
+export const GITHUB_OAUTH_STATE_COOKIE_NAME = '__Host-raibitserver_github_oauth_state';
+export const GITHUB_OAUTH_VERIFIER_COOKIE_NAME = '__Host-raibitserver_github_oauth_verifier';
 
 const BROWSER_SECRET_KEYS = new Set([
   'token',
@@ -44,7 +44,7 @@ export function githubOAuthCookieOptions() {
     httpOnly: true,
     sameSite: 'lax',
     secure: true,
-    path: '/api/control/auth/github/callback',
+    path: '/',
     maxAge: 600,
   };
 }

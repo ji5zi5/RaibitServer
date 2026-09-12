@@ -11,8 +11,8 @@ const evidence = process.env.RAIBIT_OAUTH_EVIDENCE_DIR || '';
 const manifest = z.object({ origin: z.url(), managementOrigin: z.url(), surfaces: z.array(z.object({ name: z.string(), baseUrl: z.url() })) })
   .parse(JSON.parse(await fs.readFile(path.join(evidence, 'runtime-manifest.json'), 'utf8')));
 const callbackPath = '/api/control/auth/github/callback';
-const stateCookie = 'raibitserver_github_oauth_state';
-const verifierCookie = 'raibitserver_github_oauth_verifier';
+const stateCookie = '__Host-raibitserver_github_oauth_state';
+const verifierCookie = '__Host-raibitserver_github_oauth_verifier';
 const sessionCookie = 'raibitserver_session';
 const secrets = new Set<string>();
 const outcomes: object[] = [];
@@ -63,7 +63,7 @@ async function start(page: Page, context: BrowserContext) {
   expect(authorization?.searchParams.get('redirect_uri')).toBe(`${manifest.origin}${callbackPath}`);
   expect(cookies.filter((cookie) => [stateCookie, verifierCookie].includes(cookie.name)).map(({ name, secure, httpOnly, sameSite, path: cookiePath, domain }) =>
     ({ name, secure, httpOnly, sameSite, path: cookiePath, domain })).sort((a, b) => a.name.localeCompare(b.name))).toEqual(
-    [stateCookie, verifierCookie].sort().map((name) => ({ name, secure: true, httpOnly: true, sameSite: 'Lax', path: callbackPath, domain: 'console.localhost' })));
+    [stateCookie, verifierCookie].sort().map((name) => ({ name, secure: true, httpOnly: true, sameSite: 'Lax', path: '/', domain: 'console.localhost' })));
   return { state, verifier, challenge, cookies: cookies.filter((cookie) => [stateCookie, verifierCookie].includes(cookie.name)) };
 }
 async function issue(request: APIRequestContext, profile: object) {
@@ -117,7 +117,7 @@ for (const scenario of ['missing-start', 'missing-cookie', 'wrong-state', 'wrong
     const flow = scenario === 'missing-start' ? { state: crypto.randomBytes(32).toString('base64url'), verifier: crypto.randomBytes(48).toString('base64url'), challenge: '', cookies: [] } : await start(page, context);
     secrets.add(flow.state); secrets.add(flow.verifier);
     if (scenario === 'missing-start') await context.addCookies([stateCookie, verifierCookie].map((name) => ({ name, value: name === stateCookie ? flow.state : flow.verifier,
-      domain: 'console.localhost', path: callbackPath, secure: true, httpOnly: true, sameSite: 'Lax' })));
+      domain: 'console.localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' })));
     if (scenario === 'missing-cookie') await context.clearCookies();
     if (scenario === 'wrong-verifier') await context.addCookies(flow.cookies.map((cookie) => cookie.name === verifierCookie ? { ...cookie, value: crypto.randomBytes(48).toString('base64url') } : cookie));
     if (scenario === 'expiry') await management(request, 'expire', {});

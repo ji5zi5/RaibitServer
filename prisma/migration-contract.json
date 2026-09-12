@@ -97,6 +97,10 @@
     {
       "id": "202609060001_custom_domain_lifecycle",
       "sha256": "44a36e6face136eac2dad193ab2282f5c41f423435de61127c4aba08fb36e6bb"
+    },
+    {
+      "id": "202609130001_operational_persistence",
+      "sha256": "3f0aba94669d906664b6b734d47d02d946a0960ba69e5501945bf6a5b17df817"
     }
   ]
 }

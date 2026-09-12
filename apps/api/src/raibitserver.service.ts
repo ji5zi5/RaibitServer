@@ -43,6 +43,11 @@ export class RAIBITSERVERService implements OnModuleDestroy {
     if ('disconnect' in repository) await repository.disconnect();
   }
 
+  async requireOperationalPrismaClient() {
+    const repository = await this.repositoryPromise;
+    return repository.requireOperationalPrismaClient();
+  }
+
   async signup(input: Record<string, any>, context: Record<string, any> = {}) {
     const repository: any = await this.repositoryPromise;
     const jwtSecret = jwtSecretOrThrow();

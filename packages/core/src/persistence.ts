@@ -63,6 +63,15 @@ import {
 
 type QuotaRequirement = { metric: string; increment: number };
 type ObservationLogRow = Record<string, unknown>;
+
+export class OperationalPersistenceUnavailable extends Error {
+  readonly name = 'OperationalPersistenceUnavailable';
+  readonly code = 'OPERATIONAL_PERSISTENCE_UNAVAILABLE' as const;
+
+  constructor() {
+    super('OPERATIONAL_PERSISTENCE_UNAVAILABLE');
+  }
+}
 export type PemContextSource = {
   readonly requestId: number;
   readonly source: string;
@@ -156,6 +165,10 @@ export class InMemoryControlPlaneRepository {
 
   constructor(store = new ControlPlaneStore()) {
     this.store = store;
+  }
+
+  requireOperationalPrismaClient(): never {
+    throw new OperationalPersistenceUnavailable();
   }
 
   async createOrganization(input: Record<string, any>) { return this.store.createOrganization(input); }
@@ -461,6 +474,10 @@ export class PrismaControlPlaneRepository {
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
+  }
+
+  requireOperationalPrismaClient(): PrismaClient {
+    return this.prisma;
   }
 
   setGitHubCatalogPageFetcher(fetcher: GitHubCatalogPageFetcher | null) { this.githubCatalogPageFetcher = fetcher; }

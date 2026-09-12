@@ -47,6 +47,12 @@ export { requestPasswordRecovery, completePasswordRecovery, PASSWORD_RESET_PURPO
 export { runtimeConfigStatus, assertRuntimeKeys, secretEncryptionConfigured, parseApiRuntimeConfig, validateApiRuntimeConfig, assertApiRuntimeConfig, devHeaderAuthAllowed, devTokenAuthAllowed } from './config.ts';
 export { OperationalContractError, assertOperationalWriterReady, notificationSemanticKey, operationalContractDigest, operationalIdentityProjection, parseOperationalFeaturesContract, parseOperationalRuntimeConfig, parseOperationalWriterIntent } from './operational-contract.ts';
 export type { OperationalContractErrorCode, OperationalRuntimeConfig } from './operational-contract.ts';
+export { OPERATIONAL_PROTOCOL_SESSION_SQL, OPERATIONAL_PROTOCOL_VERSION, OperationalPersistenceError, assertOperationalBindingScope, buildOperationalBackfillProjection, productionEnvironmentId, setOperationalProtocolVersion } from './operational-persistence.ts';
+export type { OperationalBackfillInput, OperationalBackfillProjection, OperationalBindingScope, OperationalPersistenceErrorCode, OperationalSqlExecutor } from './operational-persistence.ts';
+export * from './discord-alerts.ts';
+export { PrismaDiscordAlertsRepository } from './discord-alerts-postgres.ts';
+export * from './backup-policy.ts';
+export { PrismaBackupPolicyPersistence } from './backup-policy-postgres.ts';
 export { sealSecret, openSecret, secureRandomSecret, publicSecretRecord } from './secret-vault.ts';
 export { runDbConsoleQuery, browseDbConsole, resourceConsoleView } from './db-console.ts';
 export { buildPostgresProviderPlan, buildResourceProviderPlan, provisionPostgresProvider, provisionResourceProvider, providerConnectionEnvForResource, providerConsoleSurface } from './resource-providers.ts';
@@ -59,7 +65,7 @@ export type { GitHubAppInstallationState, GitHubInstallationRepository } from '.
 export { previewKey, previewWorkloadName, previewRuntimePlan } from './preview-deployments.ts';
 export * from './preview-contract.ts';
 export * from './preview-lineage.ts';
-export { createControlPlaneRepository, resolveControlPlaneRepositoryConfig, InMemoryControlPlaneRepository, PrismaControlPlaneRepository } from './persistence.ts';
+export { createControlPlaneRepository, resolveControlPlaneRepositoryConfig, InMemoryControlPlaneRepository, OperationalPersistenceUnavailable, PrismaControlPlaneRepository } from './persistence.ts';
 export { normalizePublicSiteLimit, publicSitesFromServices, publicSitesFromSnapshot } from './public-sites.ts';
 export type * from './types.ts';
 export { oauthAttempt, publicOAuthError, OAuthPublicError } from './oauth-security.ts';

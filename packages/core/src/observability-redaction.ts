@@ -4,15 +4,16 @@ export type RedactionState = { readonly v: 1; readonly pem: boolean };
 export type ObservationValue = null | boolean | number | string | ObservationValue[] | { [key: string]: ObservationValue };
 
 const marker = '****';
-const secretName = '(?:[a-z0-9_-]*(?:password|passwd|secret|token|credential|api[_-]?key|access[_-]?key|private[_-]?key|database[_-]?url|mongodb[_-]?uri|redis[_-]?url)[a-z0-9_-]*|key)';
-const assignment = new RegExp('((?:\\\\?["\\x27])?\\b' + secretName + '(?:\\\\?["\\x27])?\\s*[:=]\\s*)(\\\\?"|\\x27)', 'gi');
-const bareAssignment = new RegExp('(\\b' + secretName + '\\s*=\\s*)([^\\s"\\x27,;&]+)', 'gi');
+const truncationSuffix = ' [truncated]';
+const secretKeyFragments = ['password', 'passwd', 'secret', 'token', 'credential', 'apikey', 'api_key', 'api-key', 'accesskey', 'access_key', 'access-key', 'privatekey', 'private_key', 'private-key', 'databaseurl', 'database_url', 'database-url', 'mongodburi', 'mongodb_uri', 'mongodb-uri', 'redisurl', 'redis_url', 'redis-url'] as const;
+const pemBoundary = /-----(BEGIN|END) [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 // State contains no source bytes and can be atomically persisted beside the source watermark.
 export function sanitizeObservationLine(value: string, state: RedactionState = { v: 1, pem: false }) {
+  const input = boundedObservationInput(value);
   let pem = state.pem;
   const fragments: string[] = [];
-  let remaining = value;
+  let remaining = input.text;
   while (remaining) {
     if (pem) {
       const end = /-----END [A-Z0-9 ]*PRIVATE KEY-----/.exec(remaining);
@@ -29,36 +30,164 @@ export function sanitizeObservationLine(value: string, state: RedactionState = {
       if (!remaining) fragments.push(marker);
     }
   }
-  const masked = redactQuotedAssignments(fragments.join(''))
+  let masked = redactAssignments(redactUrlCredentials(fragments.join(''), input.truncated))
     .replace(/(^|\n)((?:Set-)?Cookie\s*:\s*)[^\r\n]*/gi, '$1$2****')
     .replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/-]+=*/gi, '$1 ****')
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, marker)
-    .replace(/\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?|xox[baprs]-)[A-Za-z0-9_-]{12,}/g, marker)
-    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^/\s"'<>]*@)/gi, (_match, scheme: string, authority: string) =>
-      scheme + (authority.startsWith(':') ? ':****@' : '****:****@'))
-    .replace(/([?&](?:[a-z0-9_-]*(?:token|password|passwd|secret|credential|api[_-]?key|access[_-]?key)[a-z0-9_-]*|key)=)[^&#\s"'<>]*/gi, '$1****')
-    .replace(bareAssignment, '$1****');
-  return { line: truncateObservationText(masked), state: { v: 1, pem } satisfies RedactionState };
+    .replace(/\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?|xox[baprs]-)[A-Za-z0-9_-]{12,}/g, marker);
+  masked = redactJwt(masked, input.truncated);
+  for (const boundary of value.matchAll(pemBoundary)) pem = boundary[1] === 'BEGIN';
+  return { line: truncateObservationText(masked + (input.truncated ? truncationSuffix : '')), state: { v: 1, pem } satisfies RedactionState };
 }
 
-function redactQuotedAssignments(value: string): string {
+function boundedObservationInput(value: string): { readonly text: string; readonly truncated: boolean } {
+  const probe = value.slice(0, OBSERVABILITY_LINE_BYTES + 1);
+  const bytes = Buffer.from(probe, 'utf8');
+  if (bytes.length <= OBSERVABILITY_LINE_BYTES && probe.length === value.length) return { text: value, truncated: false };
+  return {
+    text: bytes.subarray(0, OBSERVABILITY_LINE_BYTES).toString('utf8').replace(/\uFFFD$/, ''),
+    truncated: true,
+  };
+}
+
+function isKeyCharacter(value: string, index: number): boolean {
+  const code = value.charCodeAt(index);
+  return code === 45 || code === 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isSecretKey(value: string): boolean {
+  const key = value.toLowerCase();
+  return key === 'key' || secretKeyFragments.some(fragment => key.includes(fragment));
+}
+
+function closingQuoteLength(value: string, index: number): number {
+  if (value[index] === '\\' && (value[index + 1] === '"' || value[index + 1] === "'")) return 2;
+  return value[index] === '"' || value[index] === "'" ? 1 : 0;
+}
+
+function redactAssignments(value: string): string {
   const fragments: string[] = [];
   let consumed = 0;
-  for (const match of value.matchAll(assignment)) {
-    if (match.index < consumed) continue;
-    const quote = match[2];
-    let end = match.index + match[0].length;
-    while (true) {
-      end = value.indexOf(quote, end);
-      if (end < 0) break;
-      let slashes = 0;
-      for (let index = end - 1; index >= 0 && value[index] === '\\'; index--) slashes++;
-      const escaped = quote.length === 1 ? slashes % 2 === 1 : slashes % 4 === 2;
-      if (!escaped) break;
-      end += quote.length;
+  let index = 0;
+  while (index < value.length) {
+    if (!isKeyCharacter(value, index)) { index++; continue; }
+    const keyStart = index;
+    while (index < value.length && isKeyCharacter(value, index)) index++;
+    const keyEnd = index;
+    if (!isSecretKey(value.slice(keyStart, keyEnd))) continue;
+    index += closingQuoteLength(value, index);
+    while (index < value.length && /\s/u.test(value[index])) index++;
+    const delimiter = value[index];
+    if (delimiter !== '=' && delimiter !== ':') { index = keyEnd; continue; }
+    index++;
+    while (index < value.length && /\s/u.test(value[index])) index++;
+    const quoteLength = value[index] === '\\' && value[index + 1] === '"' ? 2 : closingQuoteLength(value, index);
+    if (quoteLength > 0) {
+      const quote = value.slice(index, index + quoteLength);
+      let end = index + quoteLength;
+      while (true) {
+        end = value.indexOf(quote, end);
+        if (end < 0) break;
+        let slashes = 0;
+        for (let slash = end - 1; slash >= 0 && value[slash] === '\\'; slash--) slashes++;
+        const escaped = quote.length === 1 ? slashes % 2 === 1 : slashes % 4 === 2;
+        if (!escaped) break;
+        end += quote.length;
+      }
+      fragments.push(value.slice(consumed, index), quote, marker, quote);
+      consumed = end < 0 ? value.length : end + quote.length;
+      index = consumed;
+      continue;
     }
-    fragments.push(value.slice(consumed, match.index), match[1], quote, marker, quote);
-    consumed = end < 0 ? value.length : end + quote.length;
+    if (delimiter === ':') { index = keyEnd; continue; }
+    const valueStart = index;
+    while (index < value.length && !/[\s"',;&]/u.test(value[index])) index++;
+    const queryKey = value[keyStart - 1] === '?' || value[keyStart - 1] === '&';
+    if (index === valueStart && !queryKey) { index = keyEnd; continue; }
+    fragments.push(value.slice(consumed, valueStart), marker);
+    consumed = index;
+  }
+  return fragments.join('') + value.slice(consumed);
+}
+
+function isWordCharacter(value: string, index: number): boolean {
+  const code = value.charCodeAt(index);
+  return code === 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function redactJwt(value: string, sourceTruncated: boolean): string {
+  const fragments: string[] = [];
+  let consumed = 0;
+  let search = 0;
+  while (search < value.length) {
+    const start = value.indexOf('eyJ', search);
+    if (start < 0) break;
+    if (start > 0 && isWordCharacter(value, start - 1)) { search = start + 3; continue; }
+    let end = start + 3;
+    while (end < value.length && isKeyCharacter(value, end)) end++;
+    if (end === start + 3 || value[end] !== '.') {
+      if (sourceTruncated && end === value.length) {
+        fragments.push(value.slice(consumed, start), marker);
+        consumed = value.length;
+      }
+      search = Math.max(end, start + 3);
+      continue;
+    }
+    end++;
+    const second = end;
+    while (end < value.length && isKeyCharacter(value, end)) end++;
+    if (end === second || value[end] !== '.') {
+      if (sourceTruncated && end === value.length) {
+        fragments.push(value.slice(consumed, start), marker);
+        consumed = value.length;
+      }
+      search = Math.max(end, start + 3);
+      continue;
+    }
+    end++;
+    const third = end;
+    while (end < value.length && isKeyCharacter(value, end)) end++;
+    if (end === third) { search = start + 3; continue; }
+    fragments.push(value.slice(consumed, start), marker);
+    consumed = end;
+    search = end;
+  }
+  return fragments.join('') + value.slice(consumed);
+}
+
+function isSchemeCharacter(value: string, index: number): boolean {
+  const code = value.charCodeAt(index);
+  return code === 43 || code === 45 || code === 46 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function redactUrlCredentials(value: string, sourceTruncated: boolean): string {
+  const fragments: string[] = [];
+  let consumed = 0;
+  let search = 0;
+  while (search < value.length) {
+    const delimiter = value.indexOf('://', search);
+    if (delimiter < 0) break;
+    let schemeStart = delimiter;
+    while (schemeStart > 0 && isSchemeCharacter(value, schemeStart - 1)) schemeStart--;
+    while (schemeStart < delimiter && !/[A-Za-z]/u.test(value[schemeStart])) schemeStart++;
+    if (schemeStart === delimiter || (schemeStart > 0 && isWordCharacter(value, schemeStart - 1))) {
+      search = delimiter + 3;
+      continue;
+    }
+    const authorityStart = delimiter + 3;
+    let authorityEnd = authorityStart;
+    let at = -1;
+    while (authorityEnd < value.length && !/[/\s"'<>]/u.test(value[authorityEnd])) {
+      if (value[authorityEnd] === '@') at = authorityEnd;
+      authorityEnd++;
+    }
+    if (at >= authorityStart) {
+      fragments.push(value.slice(consumed, authorityStart), value[authorityStart] === ':' ? ':****@' : '****:****@');
+      consumed = at + 1;
+    } else if (sourceTruncated && authorityEnd === value.length) {
+      fragments.push(value.slice(consumed, authorityStart), marker);
+      consumed = value.length;
+    }
+    search = Math.max(authorityEnd, delimiter + 3);
   }
   return fragments.join('') + value.slice(consumed);
 }
@@ -66,9 +195,8 @@ function redactQuotedAssignments(value: string): string {
 export function truncateObservationText(value: string, limit = OBSERVABILITY_LINE_BYTES): string {
   const bytes = Buffer.from(value, 'utf8');
   if (bytes.length <= limit) return value;
-  const suffix = ' [truncated]';
-  const prefix = bytes.subarray(0, Math.max(0, limit - Buffer.byteLength(suffix))).toString('utf8').replace(/\uFFFD$/, '');
-  return prefix + suffix;
+  const prefix = bytes.subarray(0, Math.max(0, limit - Buffer.byteLength(truncationSuffix))).toString('utf8').replace(/\uFFFD$/, '');
+  return prefix + truncationSuffix;
 }
 
 export function sanitizeObservationRecord(value: unknown): ObservationValue {

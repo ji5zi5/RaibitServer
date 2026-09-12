@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeObservationLine } from '../packages/core/src/observability-redaction.ts';
+import { OBSERVABILITY_LINE_BYTES, sanitizeObservationLine } from '../packages/core/src/observability-redaction.ts';
 import { sanitizeLogRecord } from '../packages/core/src/security.ts';
 import { projectObservationPayload } from '../packages/core/src/observability-projection.ts';
 
@@ -52,6 +52,53 @@ test('continues masking unsuffixed assignments', () => {
   // When sanitized, then preserve the existing masks, including consuming a trailing fragment.
   const result = sanitizeObservationLine(input);
   assert.equal(result.line === 'POSTGRES_PASSWORD=**** KEY=**** https://example.test/?token=****', true);
+});
+
+test('masks complete URL credentials before assignment redaction consumes the authority', () => {
+  // Given a valid URI whose password contains an assignment-shaped substring.
+  const input = 'postgres://user:URI_PASSWORD_PREFIX-token=P1_INDEPENDENT_CANARY_7f21@host.test/db';
+  // When sanitized, then preserve the baseline URL shape while masking the complete userinfo.
+  const result = sanitizeObservationLine(input);
+  assert.equal(result.line === 'postgres://****:****@host.test/db', true, 'complete URI credential output must match');
+});
+
+test('masks a quoted secret crossing the bounded input edge', () => {
+  // Given malformed quoted input whose secret starts immediately before the visible byte edge.
+  const input = `${'x'.repeat(OBSERVABILITY_LINE_BYTES - 30)} PASSWORD_PRIMARY="${canary.repeat(4)}`;
+  // When sanitizing the oversized line, then no boundary fragment leaks and truncation is explicit.
+  const result = sanitizeObservationLine(input);
+  assert.equal(result.line.includes(canary), false, 'boundary secret must not survive');
+  assert.equal(result.line.endsWith(' [truncated]'), true);
+  assert.equal(Buffer.byteLength(result.line) <= OBSERVABILITY_LINE_BYTES, true);
+});
+
+test('masks URL credentials whose authority terminator is beyond the bounded edge', () => {
+  // Given valid credentials whose at-sign is beyond the retained prefix.
+  const input = `postgres://user:${canary.repeat(1000)}@host.test/db`;
+  // When bounded before expensive output processing, then the retained credential prefix is masked.
+  const result = sanitizeObservationLine(input);
+  assert.equal(result.line.includes(canary), false, 'truncated URL credentials must not survive');
+  assert.equal(result.line.endsWith(' [truncated]'), true);
+});
+
+test('masks a JWT whose first delimiter is beyond the bounded edge', () => {
+  // Given a valid JWT with a first component larger than the retained prefix.
+  const input = `eyJ${canary}${'A'.repeat(OBSERVABILITY_LINE_BYTES)}.payload.signature`;
+  // When bounded before expensive output processing, then the retained JWT prefix is masked.
+  const result = sanitizeObservationLine(input);
+  assert.equal(result.line.includes(canary), false, 'truncated JWT prefix must not survive');
+  assert.equal(result.line.endsWith(' [truncated]'), true);
+});
+
+test('derives PEM continuation state from markers beyond the bounded output prefix', () => {
+  // Given a PEM begin marker beyond the portion retained for output.
+  const first = `${'x'.repeat(OBSERVABILITY_LINE_BYTES + 1)}-----BEGIN RSA PRIVATE KEY-----`;
+  // When sanitizing that line and its continuation, then state follows the complete source line.
+  const started = sanitizeObservationLine(first);
+  const ended = sanitizeObservationLine(`${canary}\n-----END RSA PRIVATE KEY-----`, started.state);
+  assert.deepEqual(started.state, { v: 1, pem: true });
+  assert.equal(ended.line.includes(canary), false, 'continued PEM content must not survive');
+  assert.deepEqual(ended.state, { v: 1, pem: false });
 });
 
 test('continues masking suffixed object fields through sanitizeLogRecord', () => {

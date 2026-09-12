@@ -1,5 +1,7 @@
 import { fetchGitHubOAuthIdentity, githubOAuthLoginPlan } from './github-integration.ts';
 import { enforceAuthAbuseLimits } from './security.ts';
+import { resolveOAuthSource } from './oauth-source.ts';
+import { OAuthPublicError } from './oauth-security.ts';
 import type { CreateOAuthTransactionInput, ConsumeOAuthTransactionInput, OAuthTransactionRecord } from './oauth-transaction.ts';
 
 type OAuthRepository = {
@@ -9,6 +11,7 @@ type OAuthRepository = {
 };
 type OAuthContext = {
   readonly source: string;
+  readonly rawHeaders?: readonly string[];
   readonly jwtSecret: unknown;
   readonly provider?: Readonly<Record<string, unknown>>;
   readonly now?: number;
@@ -58,27 +61,48 @@ function rateInput(context: OAuthContext) {
     env: { ...process.env, RAIBITSERVER_AUTH_RATE_LIMIT_KEY_SECRET: sourceKey(context) } };
 }
 
+async function requestContext(repository: OAuthRepository, request: { readonly operation: 'login' | 'callback'; readonly query: unknown }, context: OAuthContext): Promise<OAuthContext> {
+  let source = context.source;
+  let rejection: OAuthPublicError | undefined;
+  try {
+    source = resolveOAuthSource({ ...request, source, rawHeaders: context.rawHeaders ?? [], now: context.now }, process.env.RAIBITSERVER_OAUTH_RELAY_SECRET);
+  } catch (error) {
+    if (!(error instanceof OAuthPublicError)) throw error;
+    rejection = error;
+  }
+  const scoped = { ...context, source };
+  try {
+    await enforceAuthAbuseLimits(repository, { ...rateInput(scoped), action: request.operation === 'login' ? 'github-oauth-start' : 'github-oauth-callback', phase: 'request' });
+  } catch (error) {
+    // Invalid relay attempts consume peer budgets but keep their fixed public denial.
+    if (rejection && error instanceof Error && error.message === 'rate_limit_exceeded') throw rejection;
+    throw error;
+  }
+  if (rejection) throw rejection;
+  return scoped;
+}
+
 export async function startGitHubOAuth(repository: OAuthRepository, raw: unknown, context: OAuthContext) {
-  await enforceAuthAbuseLimits(repository, { ...rateInput(context), action: 'github-oauth-start', phase: 'request' });
+  const scoped = await requestContext(repository, { operation: 'login', query: raw }, context);
   const input = query(raw, ['codeChallenge', 'redirectUri']);
   const codeChallenge = text(input.codeChallenge, /^[A-Za-z0-9_-]{43}$/, 'github_oauth_challenge_required');
   if (Buffer.from(codeChallenge, 'base64url').toString('base64url') !== codeChallenge) throw new GitHubOAuthFlowError('github_oauth_challenge_invalid');
-  const config = configuration(context, input);
+  const config = configuration(scoped, input);
   const plan = githubOAuthLoginPlan({ ...config.provider, codeChallenge });
   await repository.createOAuthTransaction({ ...config.binding, state: plan.state, codeChallenge });
   return plan;
 }
 
 export async function consumeGitHubOAuthIdentity(repository: OAuthRepository, raw: unknown, context: OAuthContext) {
-  const limits = rateInput(context);
-  await enforceAuthAbuseLimits(repository, { ...limits, action: 'github-oauth-callback', phase: 'request' });
+  const scoped = await requestContext(repository, { operation: 'callback', query: raw }, context);
+  const limits = rateInput(scoped);
   const input = query(raw, ['code', 'state', 'codeVerifier', 'redirectUri', 'error']);
   const denied = 'error' in input;
   if (denied && (input.error !== 'access_denied' || 'code' in input)) throw new GitHubOAuthFlowError('github_oauth_input_invalid');
   const code = denied ? '' : text(input.code, /^[^\u0000-\u0020\u007f]{1,256}$/, 'github_oauth_code_required');
   const state = text(input.state, /^[A-Za-z0-9_-]{32,128}$/, 'github_oauth_state_required');
   const codeVerifier = text(input.codeVerifier, /^[A-Za-z0-9._~-]{43,128}$/, 'github_oauth_verifier_required');
-  const config = configuration(context, input);
+  const config = configuration(scoped, input);
   await repository.consumeOAuthTransaction({ ...config.binding, state, codeVerifier });
   if (denied) throw new GitHubOAuthFlowError('github_oauth_denied');
   const identity = await fetchGitHubOAuthIdentity({ code, codeVerifier }, config.provider);

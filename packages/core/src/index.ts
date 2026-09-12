@@ -6,6 +6,7 @@ export { DeploymentOperationError, parseDeploymentOperationBody } from './deploy
 export type { DeploymentOperation, DeploymentOperationBody, DesiredSpecSnapshot } from './deployment-operations.ts';
 export { OAuthTransactionError } from './oauth-transaction.ts';
 export { startGitHubOAuth, consumeGitHubOAuthIdentity, GitHubOAuthFlowError } from './github-oauth-flow.ts';
+export { OAUTH_RELAY_HEADER, OAUTH_BROWSER_COOKIE_NAME, issueOAuthBrowserCookie, parseOAuthBrowserCookie, signOAuthRelay } from './oauth-source.ts';
 export type { CreateOAuthTransactionInput, ConsumeOAuthTransactionInput, OAuthCleanupInput, OAuthTransactionRecord, OAuthTransactionErrorCode } from './oauth-transaction.ts';
 export { resolveBuildStrategy } from './build-strategy.ts';
 export { detectFramework } from './framework-detector.ts';

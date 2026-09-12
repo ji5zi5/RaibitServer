@@ -113,7 +113,7 @@ export function createApiHandler(controlPlane = new RAIBITSERVERControlPlane(), 
       if (method === 'GET' && url.pathname === '/auth/github/login') {
         const input = Object.fromEntries([...url.searchParams.keys()].map((key) => [key, url.searchParams.getAll(key).length === 1 ? url.searchParams.get(key) : url.searchParams.getAll(key)]));
         return send(res, 200, await oauthAttempt(controlPlane.store, 'github-oauth-start', () => startGitHubOAuth(controlPlane.store, input, {
-          source: req.socket?.remoteAddress || '', jwtSecret: auth.jwtSecret, provider: options.githubOAuth,
+          source: req.socket?.remoteAddress || '', rawHeaders: req.rawHeaders, jwtSecret: auth.jwtSecret, provider: options.githubOAuth,
         })));
       }
       if (method === 'GET' && url.pathname === '/auth/github/callback') {
@@ -121,7 +121,7 @@ export function createApiHandler(controlPlane = new RAIBITSERVERControlPlane(), 
         const response = await oauthAttempt(controlPlane.store, 'github-oauth-callback', async () => {
         if (!auth.jwtSecret) throw new OAuthPublicError('github_oauth_not_configured');
         const identity = await consumeGitHubOAuthIdentity(controlPlane.store, input, {
-          source: req.socket?.remoteAddress || '', jwtSecret: auth.jwtSecret, provider: options.githubOAuth,
+          source: req.socket?.remoteAddress || '', rawHeaders: req.rawHeaders, jwtSecret: auth.jwtSecret, provider: options.githubOAuth,
         });
         let user = controlPlane.store.findUserByGitHubId(identity.githubId) || controlPlane.store.findUserByEmail(identity.email);
         if (!user) throw statusError('github_account_not_registered', 403);

@@ -1054,7 +1054,7 @@ export class RAIBITSERVERService implements OnModuleDestroy {
   async githubLogin(input: Record<string, unknown>, request: IncomingMessage) {
     const repository = await this.repositoryPromise;
     return oauthAttempt(repository, 'github-oauth-start', () => startGitHubOAuth(repository, input, {
-        source: request.socket.remoteAddress || '', jwtSecret: process.env.RAIBITSERVER_AUTH_JWT_SECRET,
+        source: request.socket.remoteAddress || '', rawHeaders: request.rawHeaders, jwtSecret: process.env.RAIBITSERVER_AUTH_JWT_SECRET,
       }));
   }
 
@@ -1063,7 +1063,7 @@ export class RAIBITSERVERService implements OnModuleDestroy {
     return oauthAttempt(repository, 'github-oauth-callback', async () => {
     const jwtSecret = process.env.RAIBITSERVER_AUTH_JWT_SECRET;
     if (!jwtSecret) throw new OAuthPublicError('github_oauth_not_configured');
-    const identity = await consumeGitHubOAuthIdentity(repository, input, { source: request.socket.remoteAddress || '', jwtSecret });
+    const identity = await consumeGitHubOAuthIdentity(repository, input, { source: request.socket.remoteAddress || '', rawHeaders: request.rawHeaders, jwtSecret });
     let user = await repository.findUserByGitHubId(identity.githubId);
     if (!user) user = await repository.findUserByEmail(identity.email);
     if (!user) throw new ForbiddenException('github_account_not_registered');

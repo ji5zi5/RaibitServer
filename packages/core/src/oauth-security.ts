@@ -15,6 +15,7 @@ const failures = {
   github_oauth_email_failed: [502, 'exchange_failure'], github_oauth_response_too_large: [502, 'exchange_failure'],
   github_oauth_timeout: [504, 'exchange_failure'], github_oauth_failed: [502, 'exchange_failure'],
   github_oauth_not_configured: [503, 'denial'], github_oauth_audit_unavailable: [503, 'denial'],
+  github_oauth_relay_invalid: [403, 'denial'], github_oauth_relay_not_configured: [503, 'denial'],
   github_oauth_cleanup_unavailable: [503, 'denial'], github_oauth_storage_unavailable: [503, 'denial'],
   rate_limit_exceeded: [429, 'rate_limited'],
 } as const;

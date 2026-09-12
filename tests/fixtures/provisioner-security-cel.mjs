@@ -107,6 +107,12 @@ const identity = `system:serviceaccount:raibitserver-system:${fullname}-provisio
         { to: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } }, podSelector: { matchLabels: { 'k8s-app': 'kube-dns' } } }], ports: [{ protocol: 'UDP', port: 53 }, { protocol: 'TCP', port: 53 }] },
       ],
     } };
+  const recoveryWithoutIngress = structuredClone(recovery);
+  delete recoveryWithoutIngress.spec.ingress;
+  scenario('CREATE API-normalized recovery NetworkPolicy without ingress field', 'networkpolicies', recoveryWithoutIngress, 'CREATE', true);
+  const recoveryWithIngressRule = structuredClone(recovery);
+  recoveryWithIngressRule.spec.ingress = [{}];
+  scenario('CREATE recovery NetworkPolicy rejects a nonempty ingress rule', 'networkpolicies', recoveryWithIngressRule, 'CREATE', false);
   const snapshot = { apiVersion: 'v1', kind: 'Secret', metadata: { name: `recovery-credential-${suffix}`, namespace: 'tenant-a', uid: 'uid-1', labels: recoveryLabels,
     annotations: { 'raibitserver.io/source-secret-uid': 'source-uid', 'raibitserver.io/source-secret-resource-version': '19', 'raibitserver.io/source-secret-key': 'DATABASE_URL' } },
     type: 'Opaque', immutable: true, data: { DATABASE_URL: 'ZmFrZQ==' } };
@@ -134,6 +140,58 @@ const identity = `system:serviceaccount:raibitserver-system:${fullname}-provisio
     'controller-uid': job.metadata.uid, 'batch.kubernetes.io/controller-uid': job.metadata.uid,
   });
   scenario('API-normalized recovery Job', 'jobs', normalizedJob, 'CREATE', true);
+  const terminalTTLJob = structuredClone(job);
+  terminalTTLJob.spec.ttlSecondsAfterFinished = 600;
+  terminalTTLJob.status = { startTime: '2026-09-12T14:48:00Z', completionTime: '2026-09-12T14:49:00Z', succeeded: 1, conditions: [
+    { type: 'SuccessCriteriaMet', status: 'True', lastTransitionTime: '2026-09-12T14:49:00Z' },
+    { type: 'Complete', status: 'True', lastTransitionTime: '2026-09-12T14:49:00Z' },
+  ] };
+  for (const username of ['system:kube-controller-manager', 'system:serviceaccount:kube-system:ttl-after-finished-controller']) {
+    scenario(`native TTL DELETE by ${username}`, 'jobs', terminalTTLJob, 'DELETE', true);
+    cases.at(-1).activation.request.userInfo.username = username;
+  }
+  const activeTTLJob = structuredClone(terminalTTLJob);
+  activeTTLJob.status.conditions = [];
+  scenario('native TTL controller cannot delete an active recovery Job', 'jobs', activeTTLJob, 'DELETE', false);
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  const wrongTTLJob = structuredClone(terminalTTLJob);
+  wrongTTLJob.spec.ttlSecondsAfterFinished = 599;
+  scenario('native TTL controller cannot delete a recovery Job with a different TTL', 'jobs', wrongTTLJob, 'DELETE', false);
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  scenario('native TTL controller requires the exact recovery Job UID', 'jobs', terminalTTLJob, 'DELETE', false);
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  cases.at(-1).activation.request.options.preconditions.uid = 'stale-uid';
+  scenario('native TTL controller cannot create a recovery Job', 'jobs', terminalTTLJob, 'CREATE', false);
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  const deletingTTLJob = structuredClone(terminalTTLJob);
+  Object.assign(deletingTTLJob.metadata, {
+    resourceVersion: '7', generation: 1, creationTimestamp: '2026-09-12T14:47:00Z', deletionTimestamp: '2026-09-12T15:00:00Z',
+  });
+  deletingTTLJob.metadata.finalizers = ['foregroundDeletion'];
+  const finalizedTTLJob = structuredClone(deletingTTLJob);
+  delete finalizedTTLJob.metadata.finalizers;
+  for (const username of ['system:kube-controller-manager', 'system:serviceaccount:kube-system:generic-garbage-collector']) {
+    scenario(`generic GC foreground finalizer removal by ${username}`, 'jobs', finalizedTTLJob, 'UPDATE', true, { oldObject: deletingTTLJob });
+    cases.at(-1).activation.request.userInfo.username = username;
+  }
+  const gcSpecMutation = structuredClone(finalizedTTLJob);
+  gcSpecMutation.spec.ttlSecondsAfterFinished = 599;
+  scenario('generic GC cannot mutate recovery Job spec', 'jobs', gcSpecMutation, 'UPDATE', false, { oldObject: deletingTTLJob });
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  const deletingJobWithOtherFinalizer = structuredClone(deletingTTLJob);
+  deletingJobWithOtherFinalizer.metadata.finalizers.push('example.test/stable');
+  scenario('generic GC cannot remove another recovery Job finalizer', 'jobs', finalizedTTLJob, 'UPDATE', false, { oldObject: deletingJobWithOtherFinalizer });
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  const gcLabelMutation = structuredClone(finalizedTTLJob);
+  gcLabelMutation.metadata.labels['raibitserver.io/operation'] = 'changed';
+  scenario('generic GC cannot mutate recovery Job labels', 'jobs', gcLabelMutation, 'UPDATE', false, { oldObject: deletingTTLJob });
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
+  const activeDeletingJob = structuredClone(deletingTTLJob);
+  activeDeletingJob.status.conditions = [];
+  const finalizedActiveJob = structuredClone(activeDeletingJob);
+  delete finalizedActiveJob.metadata.finalizers;
+  scenario('generic GC cannot finalize an active recovery Job', 'jobs', finalizedActiveJob, 'UPDATE', false, { oldObject: activeDeletingJob });
+  cases.at(-1).activation.request.userInfo.username = 'system:kube-controller-manager';
   for (const [name, annotation] of [['missing', undefined], ['truncated', 'recovery-job/v1:sha256:abcd'],
     ['version', `recovery-job/v2:sha256:${'0'.repeat(64)}`]]) {
     const changed = structuredClone(job);

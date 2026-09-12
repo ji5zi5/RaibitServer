@@ -83,6 +83,9 @@ func Test_RecoveryNetworkPolicyManifest_emits_admission_fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if ttl := jobManifest["spec"].(map[string]any)["ttlSecondsAfterFinished"]; ttl != 600 {
+		t.Fatalf("ttlSecondsAfterFinished=%v, want 600", ttl)
+	}
 	restore, err := NewIsolatedJob(testJobSpec(t, job.spec.Connection, StreamStdin))
 	if err != nil {
 		t.Fatal(err)

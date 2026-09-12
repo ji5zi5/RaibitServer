@@ -6,6 +6,14 @@ import test from 'node:test';
 const security = readFileSync('infra/helm/raibitserver/templates/worker-security.yaml', 'utf8');
 const authorityKey = 'raibitserver.io/recovery-authority';
 const providerKey = 'raibitserver.io/provider';
+const ttlControllerIdentities = new Set([
+  'system:kube-controller-manager',
+  'system:serviceaccount:kube-system:ttl-after-finished-controller',
+]);
+const garbageCollectorIdentities = new Set([
+  'system:kube-controller-manager',
+  'system:serviceaccount:kube-system:generic-garbage-collector',
+]);
 const providerPorts = { postgresql: 5432, mysql: 3306, mariadb: 3306, mongodb: 27017, redis: 6379, valkey: 6379 };
 const namespaceLabels = {
   'kubernetes.io/metadata.name': 'tenant-a',
@@ -71,18 +79,22 @@ function allowsAuthorityPatch(namespace, before, after) {
     equal(before.spec, after.spec);
 }
 
-function generatedRecoveryPolicy() {
+function generatedRecoveryObjects() {
   if (process.env.RAIBIT_RECOVERY_FIXTURE) {
-    return JSON.parse(readFileSync(process.env.RAIBIT_RECOVERY_FIXTURE, 'utf8')).policy;
+    return JSON.parse(readFileSync(process.env.RAIBIT_RECOVERY_FIXTURE, 'utf8'));
   }
   const go = process.env.RAIBIT_GO || 'go';
   const result = spawnSync(go, ['test', './internal/backup', '-run', '^Test_RecoveryNetworkPolicyManifest_emits_admission_fixture$', '-count=1', '-v'], {
     cwd: 'services/provisioner', encoding: 'utf8', windowsHide: true,
   });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  const payload = result.stdout.match(/ADMISSION_FIXTURE=(\{.*\})/)?.[1];
+  const payload = result.stdout.match(/BOUNDARY_FIXTURE=(\{.*\})/)?.[1];
   assert.ok(payload, result.stdout);
   return JSON.parse(payload);
+}
+
+function generatedRecoveryPolicy() {
+  return generatedRecoveryObjects().policy;
 }
 
 function allowsRecoveryPolicy(policy) {
@@ -108,8 +120,41 @@ function allowsRecoveryPolicy(policy) {
     dnsPorts.some(port => port.protocol === 'UDP') && dnsPorts.some(port => port.protocol === 'TCP');
   return Object.hasOwn(providerPorts, engine) && exactAuthority && exactProvider && exactPort && exactDNS &&
     metadata.labels['raibitserver.io/owned-by'] === 'recovery' &&
-    spec.policyTypes?.join(',') === 'Ingress,Egress' && spec.ingress?.length === 0 && spec.egress?.length === 2 &&
+    spec.policyTypes?.join(',') === 'Ingress,Egress' &&
+    (!Object.hasOwn(spec, 'ingress') || (Array.isArray(spec.ingress) && spec.ingress.length === 0)) && spec.egress?.length === 2 &&
     exactJobSelector;
+}
+
+function isExactTerminalRecoveryJob(job) {
+  const labels = job.metadata.labels ?? {};
+  const exactLabels = Object.keys(labels).length === 6 &&
+    labels['raibitserver.io/owned-by'] === 'recovery' &&
+    typeof labels['raibitserver.io/operation'] === 'string' && labels['raibitserver.io/operation'] !== '' &&
+    typeof labels['raibitserver.io/resource'] === 'string' && labels['raibitserver.io/resource'] !== '' &&
+    /^[1-9][0-9]*$/.test(labels['raibitserver.io/attempt'] ?? '') &&
+    /^rj1-[a-z2-7]{51}[aq]$/.test(labels['raibitserver.io/spec-identity'] ?? '') &&
+    /^recovery-credential-[a-f0-9]{24}$/.test(labels['raibitserver.io/credential-snapshot'] ?? '');
+  const terminal = job.status?.conditions?.some(condition =>
+    ['Complete', 'Failed'].includes(condition.type) && condition.status === 'True');
+  return /^recovery-job-[a-f0-9]{24}$/.test(job.metadata.name) && exactLabels &&
+    job.spec.ttlSecondsAfterFinished === 600 && terminal;
+}
+
+function allowsTTLControllerDelete(username, job, preconditionUID) {
+  return ttlControllerIdentities.has(username) && isExactTerminalRecoveryJob(job) && preconditionUID === job.metadata.uid;
+}
+
+function allowsGarbageCollectorFinalizerRemoval(username, before, after) {
+  const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+  const stableMetadata = ['name', 'namespace', 'uid', 'resourceVersion', 'generation', 'creationTimestamp', 'deletionTimestamp', 'labels'];
+  const optionalMetadata = ['generateName', 'deletionGracePeriodSeconds', 'annotations', 'ownerReferences'];
+  const sameOptional = optionalMetadata.every(key => Object.hasOwn(after.metadata, key) === Object.hasOwn(before.metadata, key) &&
+    (!Object.hasOwn(before.metadata, key) || equal(after.metadata[key], before.metadata[key])));
+  return garbageCollectorIdentities.has(username) && isExactTerminalRecoveryJob(before) &&
+    before.metadata.deletionTimestamp !== undefined && before.metadata.finalizers?.includes('foregroundDeletion') &&
+    equal(after.metadata.finalizers ?? [], before.metadata.finalizers.filter(finalizer => finalizer !== 'foregroundDeletion')) &&
+    stableMetadata.every(key => equal(after.metadata[key], before.metadata[key])) && sameOptional &&
+    equal(after.spec, before.spec) && equal(after.status, before.status);
 }
 
 function allowsRecoveryPolicyOperation(operation, policy, preconditionUID) {
@@ -178,7 +223,14 @@ test('real generated recovery NetworkPolicy satisfies the engine-bound admission
   assert.match(policyText, /object\.metadata\.labels\.size\(\) == 6/);
   assert.match(policyText, /request\.operation != 'UPDATE'/);
   assert.match(policyText, /request\.options\.preconditions\.uid == oldObject\.metadata\.uid/);
+  assert.match(policyText, /!has\(object\.spec\.ingress\).*object\.spec\.ingress\.size\(\) == 0/);
   assert.equal(allowsRecoveryPolicyOperation('CREATE', manifest), true);
+  const omittedIngress = structuredClone(manifest);
+  delete omittedIngress.spec.ingress;
+  assert.equal(allowsRecoveryPolicy(omittedIngress), true);
+  const nonemptyIngress = structuredClone(manifest);
+  nonemptyIngress.spec.ingress = [{}];
+  assert.equal(allowsRecoveryPolicy(nonemptyIngress), false);
   const persisted = structuredClone(manifest);
   persisted.metadata.uid = 'policy-uid';
   assert.equal(allowsRecoveryPolicyOperation('UPDATE', persisted), false);
@@ -196,4 +248,61 @@ test('real generated recovery NetworkPolicy satisfies the engine-bound admission
     mutate(changed);
     assert.equal(allowsRecoveryPolicy(changed), false);
   }
+});
+
+test('native TTL controller may delete only a terminal exact owned recovery Job', () => {
+  const policyText = compact(documentNamed('provisioner-recovery-jobs', 'ValidatingAdmissionPolicy'));
+  const job = generatedRecoveryObjects().job;
+  job.metadata.uid = 'job-uid';
+  job.status = { conditions: [{ type: 'Complete', status: 'True' }] };
+
+  assert.match(policyText, /system:kube-controller-manager/);
+  assert.match(policyText, /system:serviceaccount:kube-system:ttl-after-finished-controller/);
+  assert.match(policyText, /oldObject\.spec\.ttlSecondsAfterFinished == 600/);
+  assert.match(policyText, /condition\.type in \['Complete', 'Failed'\].*condition\.status == 'True'/);
+  for (const identity of ttlControllerIdentities) {
+    assert.equal(allowsTTLControllerDelete(identity, job, 'job-uid'), true);
+  }
+  assert.equal(allowsTTLControllerDelete('system:serviceaccount:tenant-a:attacker', job, 'job-uid'), false);
+  assert.equal(allowsTTLControllerDelete('system:serviceaccount:kube-system:ttl-after-finished-controller', job, 'stale-uid'), false);
+  const active = structuredClone(job);
+  active.status = { conditions: [] };
+  assert.equal(allowsTTLControllerDelete('system:kube-controller-manager', active, 'job-uid'), false);
+  const unowned = structuredClone(job);
+  delete unowned.metadata.labels['raibitserver.io/owned-by'];
+  assert.equal(allowsTTLControllerDelete('system:kube-controller-manager', unowned, 'job-uid'), false);
+});
+
+test('generic garbage collector may only remove the foreground finalizer from a deleting terminal recovery Job', () => {
+  const policyText = compact(documentNamed('provisioner-recovery-jobs', 'ValidatingAdmissionPolicy'));
+  const before = generatedRecoveryObjects().job;
+  before.metadata.uid = 'job-uid';
+  before.metadata.resourceVersion = '7';
+  before.metadata.deletionTimestamp = '2026-09-12T15:00:00Z';
+  before.metadata.finalizers = ['foregroundDeletion'];
+  before.status = { conditions: [{ type: 'Complete', status: 'True' }] };
+  const after = structuredClone(before);
+  delete after.metadata.finalizers;
+
+  assert.match(policyText, /system:serviceaccount:kube-system:generic-garbage-collector/);
+  assert.match(policyText, /!has\(object\.metadata\.finalizers\) \? \[\] : object\.metadata\.finalizers/);
+  assert.match(policyText, /has\(object\.metadata\.generateName\) == has\(oldObject\.metadata\.generateName\)/);
+  assert.match(policyText, /object\.metadata\.labels == oldObject\.metadata\.labels/);
+  assert.match(policyText, /object\.spec == oldObject\.spec && object\.status == oldObject\.status/);
+  for (const identity of garbageCollectorIdentities) {
+    assert.equal(allowsGarbageCollectorFinalizerRemoval(identity, before, after), true);
+  }
+  assert.equal(allowsGarbageCollectorFinalizerRemoval('system:serviceaccount:tenant-a:attacker', before, after), false);
+  const changedSpec = structuredClone(after);
+  changedSpec.spec.ttlSecondsAfterFinished = 599;
+  assert.equal(allowsGarbageCollectorFinalizerRemoval('system:kube-controller-manager', before, changedSpec), false);
+  const beforeWithStableFinalizer = structuredClone(before);
+  beforeWithStableFinalizer.metadata.finalizers.push('example.test/stable');
+  assert.equal(allowsGarbageCollectorFinalizerRemoval('system:kube-controller-manager', beforeWithStableFinalizer, after), false);
+  const changedLabels = structuredClone(after);
+  changedLabels.metadata.labels['raibitserver.io/operation'] = 'changed';
+  assert.equal(allowsGarbageCollectorFinalizerRemoval('system:kube-controller-manager', before, changedLabels), false);
+  const addedGenerateName = structuredClone(after);
+  addedGenerateName.metadata.generateName = 'recovery-job-';
+  assert.equal(allowsGarbageCollectorFinalizerRemoval('system:kube-controller-manager', before, addedGenerateName), false);
 });

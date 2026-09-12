@@ -1361,10 +1361,29 @@ spec:
     - name: snapshot
       expression: "object.metadata.labels['raibitserver.io/credential-snapshot']"
   validations:
-    - expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s-provisioner'" .Release.Namespace (include "raibitserver.fullname" .) | quote }}
-      message: "recovery Jobs are reserved for the provisioner"
     - expression: >-
-        request.operation == 'DELETE' || (request.operation == 'CREATE' && object.metadata.labels['raibitserver.io/owned-by'] == 'recovery' &&
+        {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s-provisioner'" .Release.Namespace (include "raibitserver.fullname" .) }} ||
+        (request.operation == 'DELETE' &&
+        request.userInfo.username in ['system:kube-controller-manager', 'system:serviceaccount:kube-system:ttl-after-finished-controller'] &&
+        oldObject.metadata.name.matches('^recovery-job-[a-f0-9]{24}$') &&
+        has(oldObject.metadata.labels) && oldObject.metadata.labels.size() == 6 &&
+        ['raibitserver.io/owned-by', 'raibitserver.io/operation', 'raibitserver.io/resource',
+         'raibitserver.io/attempt', 'raibitserver.io/spec-identity', 'raibitserver.io/credential-snapshot'].all(key,
+          key in oldObject.metadata.labels) &&
+        oldObject.metadata.labels['raibitserver.io/owned-by'] == 'recovery' &&
+        oldObject.metadata.labels['raibitserver.io/operation'] != '' &&
+        oldObject.metadata.labels['raibitserver.io/resource'] != '' &&
+        oldObject.metadata.labels['raibitserver.io/attempt'].matches('^[1-9][0-9]*$') &&
+        oldObject.metadata.labels['raibitserver.io/spec-identity'].matches('^rj1-[a-z2-7]{51}[aq]$') &&
+        oldObject.metadata.labels['raibitserver.io/credential-snapshot'].matches('^recovery-credential-[a-f0-9]{24}$') &&
+        oldObject.spec.ttlSecondsAfterFinished == 600 &&
+        has(oldObject.status.conditions) && oldObject.status.conditions.exists(condition,
+          condition.type in ['Complete', 'Failed'] && condition.status == 'True')) ||
+        (request.operation == 'UPDATE' &&
+        request.userInfo.username in ['system:kube-controller-manager', 'system:serviceaccount:kube-system:generic-garbage-collector'])
+      message: "recovery Jobs are reserved for the provisioner except exact native TTL and foreground GC cleanup"
+    - expression: >-
+        request.operation != 'CREATE' || (object.metadata.labels['raibitserver.io/owned-by'] == 'recovery' &&
         object.metadata.labels['raibitserver.io/spec-identity'].matches('^rj1-[a-z2-7]{51}[aq]$') &&
         has(object.metadata.annotations) && object.metadata.annotations['raibitserver.io/spec-identity'].matches('^recovery-job/v1:sha256:[a-f0-9]{64}$') && object.spec.backoffLimit == 0 &&
         object.spec.activeDeadlineSeconds > 0 && object.spec.activeDeadlineSeconds <= 1800 && object.spec.template.spec.automountServiceAccountToken == false &&
@@ -1392,8 +1411,43 @@ spec:
           (!has(container.env) || container.env.all(env, !has(env.valueFrom) ||
             (has(env.valueFrom.secretKeyRef) && env.valueFrom.secretKeyRef.name == variables.snapshot)))))
       message: "recovery Jobs may read only their credential snapshot, including init containers and volumes"
-    - expression: "request.operation != 'UPDATE'"
-      message: "recovery Jobs are immutable"
+    - expression: >-
+        request.operation != 'UPDATE' ||
+        (request.userInfo.username in ['system:kube-controller-manager', 'system:serviceaccount:kube-system:generic-garbage-collector'] &&
+        oldObject.metadata.name.matches('^recovery-job-[a-f0-9]{24}$') &&
+        has(oldObject.metadata.labels) && oldObject.metadata.labels.size() == 6 &&
+        ['raibitserver.io/owned-by', 'raibitserver.io/operation', 'raibitserver.io/resource',
+         'raibitserver.io/attempt', 'raibitserver.io/spec-identity', 'raibitserver.io/credential-snapshot'].all(key,
+          key in oldObject.metadata.labels) &&
+        oldObject.metadata.labels['raibitserver.io/owned-by'] == 'recovery' &&
+        oldObject.metadata.labels['raibitserver.io/operation'] != '' &&
+        oldObject.metadata.labels['raibitserver.io/resource'] != '' &&
+        oldObject.metadata.labels['raibitserver.io/attempt'].matches('^[1-9][0-9]*$') &&
+        oldObject.metadata.labels['raibitserver.io/spec-identity'].matches('^rj1-[a-z2-7]{51}[aq]$') &&
+        oldObject.metadata.labels['raibitserver.io/credential-snapshot'].matches('^recovery-credential-[a-f0-9]{24}$') &&
+        oldObject.spec.ttlSecondsAfterFinished == 600 &&
+        has(oldObject.status.conditions) && oldObject.status.conditions.exists(condition,
+          condition.type in ['Complete', 'Failed'] && condition.status == 'True') &&
+        has(oldObject.metadata.deletionTimestamp) && has(oldObject.metadata.finalizers) &&
+        oldObject.metadata.finalizers.exists(finalizer, finalizer == 'foregroundDeletion') &&
+        (!has(object.metadata.finalizers) ? [] : object.metadata.finalizers) ==
+          oldObject.metadata.finalizers.filter(finalizer, finalizer != 'foregroundDeletion') &&
+        object.apiVersion == oldObject.apiVersion && object.kind == oldObject.kind &&
+        object.metadata.name == oldObject.metadata.name &&
+        has(object.metadata.generateName) == has(oldObject.metadata.generateName) &&
+        (!has(oldObject.metadata.generateName) || object.metadata.generateName == oldObject.metadata.generateName) &&
+        object.metadata.namespace == oldObject.metadata.namespace && object.metadata.uid == oldObject.metadata.uid &&
+        object.metadata.resourceVersion == oldObject.metadata.resourceVersion && object.metadata.generation == oldObject.metadata.generation &&
+        object.metadata.creationTimestamp == oldObject.metadata.creationTimestamp && object.metadata.deletionTimestamp == oldObject.metadata.deletionTimestamp &&
+        has(object.metadata.deletionGracePeriodSeconds) == has(oldObject.metadata.deletionGracePeriodSeconds) &&
+        (!has(oldObject.metadata.deletionGracePeriodSeconds) || object.metadata.deletionGracePeriodSeconds == oldObject.metadata.deletionGracePeriodSeconds) &&
+        has(object.metadata.labels) && object.metadata.labels == oldObject.metadata.labels &&
+        has(object.metadata.annotations) == has(oldObject.metadata.annotations) &&
+        (!has(oldObject.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations) &&
+        has(object.metadata.ownerReferences) == has(oldObject.metadata.ownerReferences) &&
+        (!has(oldObject.metadata.ownerReferences) || object.metadata.ownerReferences == oldObject.metadata.ownerReferences) &&
+        object.spec == oldObject.spec && object.status == oldObject.status)
+      message: "recovery Jobs are immutable except exact foregroundDeletion finalizer removal by native GC"
     - expression: >-
         request.operation != 'DELETE' || (has(request.options) && has(request.options.preconditions) && request.options.preconditions.uid == oldObject.metadata.uid)
       message: "recovery Job deletion requires its exact UID"
@@ -1525,7 +1579,8 @@ spec:
         ['raibitserver.io/owned-by', 'raibitserver.io/operation', 'raibitserver.io/resource',
          'raibitserver.io/attempt', 'raibitserver.io/spec-identity', 'raibitserver.io/provider'].all(key, key in object.metadata.labels) &&
         object.metadata.labels['raibitserver.io/owned-by'] == 'recovery' &&
-        object.spec.policyTypes == ['Ingress', 'Egress'] && object.spec.ingress == [] && object.spec.egress.size() == 2 &&
+        object.spec.policyTypes == ['Ingress', 'Egress'] &&
+        (!has(object.spec.ingress) || object.spec.ingress.size() == 0) && object.spec.egress.size() == 2 &&
         has(object.spec.podSelector.matchLabels) && object.spec.podSelector.matchLabels.size() == 5 &&
         (!has(object.spec.podSelector.matchExpressions) || object.spec.podSelector.matchExpressions.size() == 0) &&
         object.spec.podSelector.matchLabels.all(key,

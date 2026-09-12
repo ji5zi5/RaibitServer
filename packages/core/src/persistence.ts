@@ -1073,11 +1073,17 @@ export class PrismaControlPlaneRepository {
       const existing = await tx.project.findUnique({ where: { organizationId_slug: { organizationId: input.organizationId, slug } } });
       assertMutable(existing, 'project');
       await enforcePrismaQuotaRequirements(tx, input.actorUserId, 'project:create', [{ metric: 'maxProjects', increment: existing ? 0 : 1 }]);
-      return tx.project.upsert({
+      const project = await tx.project.upsert({
         where: { organizationId_slug: { organizationId: input.organizationId, slug } },
         update: { name: input.name, description: input.description || '', status: input.actorUserId ? 'ACTIVE' : (input.status || 'ACTIVE') },
         create: { organizationId: input.organizationId, name: input.name, slug, description: input.description || '', status: input.actorUserId ? 'ACTIVE' : (input.status || 'ACTIVE') },
       });
+      await tx.environment.upsert({
+        where: { projectId_kind: { projectId: project.id, kind: 'prod' } },
+        update: {},
+        create: { id: environmentIdForKind(project.id, 'prod'), projectId: project.id, kind: 'prod', status: 'active' },
+      });
+      return project;
     });
   }
 

@@ -210,3 +210,60 @@ for (const spec of prismaIdentityCases) test(`round2 Prisma constructor expressi
   // Then none of those distinct development operations alias one another.
   assert.equal(new Set(variants.map(construct)).size, variants.length);
 });
+
+// H1 records commands from the real public method, not PostgreSQL behavior.
+// No rows, SQL constraints, commit/rollback or Prisma engine are simulated.
+function projectAdmissionCommands({ existing = null, environmentError = null } = {}) {
+  const calls = [];
+  const project = { id: 'database-generated-project-id', organizationId: 'org-fixture', name: 'Writer project', slug: 'writer-project', status: 'ACTIVE' };
+  const tx = {
+    async $executeRawUnsafe(sql) { calls.push({ operation: 'protocol', sql }); },
+    project: {
+      async findUnique(input) { calls.push({ operation: 'project-read', input }); return existing; },
+      async upsert(input) { calls.push({ operation: 'project-upsert', input }); return project; },
+    },
+    environment: {
+      async upsert(input) {
+        calls.push({ operation: 'environment-upsert', input });
+        if (environmentError) throw environmentError;
+      },
+    },
+  };
+  const repository = new PrismaControlPlaneRepository({
+    async $transaction(work, options) {
+      calls.push({ operation: 'transaction-start', options });
+      const result = await work(tx);
+      calls.push({ operation: 'transaction-return' });
+      return result;
+    },
+  });
+  return { repository, project, calls };
+}
+
+for (const replay of [false, true]) test(`H1 project admission emits default-prod write in its transaction: replay=${replay}`, async () => {
+  // Given the exact hosted fixture's project input and a database-returned ID.
+  const { repository, project, calls } = projectAdmissionCommands({ existing: replay ? { id: 'database-generated-project-id', status: 'ACTIVE' } : null });
+  // When the actual public Prisma method constructs its admission commands.
+  const result = await repository.createProject({ organizationId: 'org-fixture', name: 'Writer project', slug: 'writer-project' });
+  // Then prod initialization completes before transaction return, with legacy identity.
+  assert.strictEqual(result, project);
+  assert.deepEqual(calls.map(call => call.operation), ['transaction-start', 'protocol', 'project-read', 'project-upsert', 'environment-upsert', 'transaction-return']);
+  assert.deepEqual(calls[0].options, { isolationLevel: 'Serializable' });
+  assert.equal(calls[1].sql, "SET LOCAL raibitserver.operational_protocol = '2'");
+  assert.deepEqual(calls[4].input, {
+    where: { projectId_kind: { projectId: project.id, kind: 'prod' } },
+    update: {},
+    create: { id: 'env_prod_database-generated-project-id', projectId: project.id, kind: 'prod', status: 'active' },
+  });
+  assert.deepEqual(calls[3].input.create, { organizationId: 'org-fixture', name: 'Writer project', slug: 'writer-project', description: '', status: 'ACTIVE' });
+});
+
+test('H1 project admission propagates default-prod write failure before returning success', async () => {
+  // Given a narrow command boundary which rejects the environment write.
+  const error = new Error('environment-write-rejected');
+  const { repository, calls } = projectAdmissionCommands({ environmentError: error });
+  // When the actual public method is called, then it must await and propagate that error.
+  await assert.rejects(repository.createProject({ organizationId: 'org-fixture', name: 'Writer project', slug: 'writer-project' }), observed => observed === error);
+  assert.equal(calls.at(-1).operation, 'environment-upsert');
+  assert.equal(calls.filter(call => call.operation === 'transaction-start').length, 1);
+});

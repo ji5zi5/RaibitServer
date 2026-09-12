@@ -4,7 +4,7 @@ export type RedactionState = { readonly v: 1; readonly pem: boolean };
 export type ObservationValue = null | boolean | number | string | ObservationValue[] | { [key: string]: ObservationValue };
 
 const marker = '****';
-const secretName = '(?:[a-z0-9_-]*(?:password|passwd|secret|token|credential|api[_-]?key|access[_-]?key|private[_-]?key|database[_-]?url|mongodb[_-]?uri|redis[_-]?url)|key)';
+const secretName = '(?:[a-z0-9_-]*(?:password|passwd|secret|token|credential|api[_-]?key|access[_-]?key|private[_-]?key|database[_-]?url|mongodb[_-]?uri|redis[_-]?url)[a-z0-9_-]*|key)';
 const assignment = new RegExp('((?:\\\\?["\\x27])?\\b' + secretName + '(?:\\\\?["\\x27])?\\s*[:=]\\s*)(\\\\?"|\\x27)', 'gi');
 const bareAssignment = new RegExp('(\\b' + secretName + '\\s*=\\s*)([^\\s"\\x27,;&]+)', 'gi');
 
@@ -36,7 +36,7 @@ export function sanitizeObservationLine(value: string, state: RedactionState = {
     .replace(/\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?|xox[baprs]-)[A-Za-z0-9_-]{12,}/g, marker)
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)([^/\s"'<>]*@)/gi, (_match, scheme: string, authority: string) =>
       scheme + (authority.startsWith(':') ? ':****@' : '****:****@'))
-    .replace(/([?&](?:[a-z0-9_-]*(?:token|password|passwd|secret|credential|api[_-]?key|access[_-]?key)|key)=)[^&#\s"'<>]*/gi, '$1****')
+    .replace(/([?&](?:[a-z0-9_-]*(?:token|password|passwd|secret|credential|api[_-]?key|access[_-]?key)[a-z0-9_-]*|key)=)[^&#\s"'<>]*/gi, '$1****')
     .replace(bareAssignment, '$1****');
   return { line: truncateObservationText(masked), state: { v: 1, pem } satisfies RedactionState };
 }

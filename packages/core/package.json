@@ -28,6 +28,7 @@
     ".": "./src/index.ts",
     "./domain-router": "./src/domain-router.ts",
     "./execution": "./src/execution.ts",
+    "./operational-contract": "./src/operational-contract.ts",
     "./oauth-source": "./src/oauth-source.ts"
   },
   "dependencies": {

@@ -45,6 +45,8 @@ export { hashPassword, hashPasswordAsync, verifyPassword, verifyPasswordAsync, n
 export { issueSignupEmailVerificationCode, resendEmailVerificationCode, verifyEmailCodeAndCreateSession, assertUserEmailVerified, normalizeEmailVerificationCode, generateEmailVerificationCode, hashEmailVerificationCode, buildEmailVerificationMessage, deliverEmailVerificationMessage, emailVerificationSenderFromEnv, emailVerificationSenderDomainFromEnv } from './email-verification.ts';
 export { requestPasswordRecovery, completePasswordRecovery, PASSWORD_RESET_PURPOSE, PASSWORD_RESET_TTL_SECONDS, PASSWORD_RESET_MAX_ATTEMPTS, PASSWORD_RESET_COOLDOWN_SECONDS } from './password-recovery.ts';
 export { runtimeConfigStatus, assertRuntimeKeys, secretEncryptionConfigured, parseApiRuntimeConfig, validateApiRuntimeConfig, assertApiRuntimeConfig, devHeaderAuthAllowed, devTokenAuthAllowed } from './config.ts';
+export { OperationalContractError, assertOperationalWriterReady, notificationSemanticKey, operationalContractDigest, operationalIdentityProjection, parseOperationalFeaturesContract, parseOperationalRuntimeConfig, parseOperationalWriterIntent } from './operational-contract.ts';
+export type { OperationalContractErrorCode, OperationalRuntimeConfig } from './operational-contract.ts';
 export { sealSecret, openSecret, secureRandomSecret, publicSecretRecord } from './secret-vault.ts';
 export { runDbConsoleQuery, browseDbConsole, resourceConsoleView } from './db-console.ts';
 export { buildPostgresProviderPlan, buildResourceProviderPlan, provisionPostgresProvider, provisionResourceProvider, providerConnectionEnvForResource, providerConsoleSurface } from './resource-providers.ts';

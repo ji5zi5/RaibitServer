@@ -8,13 +8,19 @@ import { parse } from 'yaml';
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 export const digest = (content) => createHash('sha256').update(content.replaceAll('\r\n', '\n')).digest('hex');
 export const migrationSetDigest = (entries) => digest(`${entries.map((entry) => `${entry.id}:${entry.sha256}`).join('\n')}\n`);
-const reviewedTriggerMigrations = new Set(['000014_resource_recovery', '000015_preview_lineage', '202609130001_operational_persistence']);
+const reviewedTriggerMigrations = new Set(['000014_resource_recovery', '000015_preview_lineage', '202609130001_operational_persistence', '202609130002_runtime_environment_protocol']);
 const reviewedCompatibilityContracts = new Map([
   ['000017_github_integration_lifecycle', 'c470f59cd7902fc70306d75d31a230b4c6159d9030147329c66b329324157198'],
   ['000017_organization_invites', '065527eaa28391ce49cdf3e0a3467e1c4220f61783385f9476f337d0252f630b'],
   ['000018_github_catalog_generation', 'fc72c579048e9f186ca44992289ad66eae44823a1cda38fcb8f0c253a75b1978'],
   ['000018_membership_versions', '166ec8f77c0720aa2adc48dae2680be4e4c0b6254b16ff9de716b5945ab1e9fe'],
   ['202609060001_custom_domain_lifecycle', '44a36e6face136eac2dad193ab2282f5c41f423435de61127c4aba08fb36e6bb'],
+]);
+const reviewedFunctionReplacementContracts = new Map([
+  ['202609130003_operational_state_dispatch', {
+    sqlDigest: '72001f2d48c4d4890057a258408facd8fb14cc058c61e9a70e2b02dd7b56681c',
+    functions: ['raibit_operational_state_guard'],
+  }],
 ]);
 // Anchor manually reviewed schema DDL that precedes the closed trigger declarations.
 const reviewedTriggerContracts = new Map([
@@ -77,6 +83,20 @@ const reviewedTriggerContracts = new Map([
       '"TemplateInstallationVersion_state_guard"|INSERTORUPDATEORDELETE|"TemplateInstallationVersion"|raibit_operational_state_guard',
       '"TemplateInstallation_protocol_guard"|INSERTORUPDATEORDELETE|"TemplateInstallation"|raibit_operational_protocol_guard',
       '"WorkflowJob_operational_protocol_guard"|INSERTORUPDATEORDELETE|"WorkflowJob"|raibit_operational_protocol_guard',
+    ],
+  }],
+  ['202609130002_runtime_environment_protocol', {
+    sqlDigest: 'eebc11a218f527416688b643f4ab630a9adb90a07fb4362e3467873f8967e191',
+    prefixDigest: '230ca3c6a948af259c2567501122ad8168933973fddfae089d815f6cde54954a',
+    functions: [
+      'raibit_deployment_runtime_environment_guard',
+      'raibit_preview_lineage_runtime_environment_guard',
+      'raibit_workflow_job_runtime_environment_guard',
+    ],
+    triggers: [
+      '"Deployment_runtime_environment_guard"|INSERTORUPDATEORDELETE|"Deployment"|raibit_deployment_runtime_environment_guard',
+      '"PreviewLineage_runtime_environment_guard"|INSERTORUPDATEORDELETE|"PreviewLineage"|raibit_preview_lineage_runtime_environment_guard',
+      '"WorkflowJob_runtime_environment_guard"|INSERTORUPDATEORDELETE|"WorkflowJob"|raibit_workflow_job_runtime_environment_guard',
     ],
   }],
 ]);
@@ -194,6 +214,27 @@ export function checkReviewedTriggerSql(sql, migrationId) {
   assertSqlTrivia(remaining);
 }
 
+function checkReviewedFunctionReplacementSql(sql, migrationId) {
+  const contract = reviewedFunctionReplacementContracts.get(migrationId);
+  assert.ok(contract, 'reviewed function replacement contract is missing');
+  assert.equal(digest(sql), contract.sqlDigest, `reviewed function replacement changed: ${migrationId}`);
+  const functions = new Set();
+  let declarationCount = 0;
+  const functionPattern = /CREATE\s+OR\s+REPLACE\s+FUNCTION\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(\)\s+RETURNS\s+trigger\s+LANGUAGE\s+plpgsql\s+AS\s+(\$\$|\$[A-Za-z_][A-Za-z_0-9]*\$)([\s\S]*?)\2\s*;/gi;
+  const remaining = sql.replace(functionPattern, (_statement, name, _delimiter, body) => {
+    const code = executableSql(body);
+    assert.match(code, /^\s*BEGIN[\s\S]*END\s*$/i, 'replacement trigger function must be a bounded BEGIN/END body');
+    assert.doesNotMatch(code, /\b(?:WITH|INSERT|UPDATE|DELETE)\b/i, 'replacement trigger function may not mutate rows');
+    assert.doesNotMatch(code, /\b(?:EXECUTE|PERFORM|CALL|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE)\b/i, 'replacement trigger function may not execute dynamic or schema-changing SQL');
+    functions.add(name.toLowerCase());
+    declarationCount++;
+    return '';
+  });
+  assert.equal(declarationCount, functions.size, 'reviewed replacement function declarations must be unique');
+  assert.deepEqual([...functions].sort(), contract.functions, 'reviewed replacement function set changed');
+  assertSqlTrivia(remaining);
+}
+
 function checkReviewedCompatibilitySql(sql, migrationId) {
   assert.equal(digest(sql), reviewedCompatibilityContracts.get(migrationId), `reviewed migration changed: ${migrationId}`);
   assert.doesNotMatch(sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' '), /(?:^|;)\s*(?:DELETE|INSERT|DO|GRANT|REVOKE)\b/i, 'reviewed migration became destructive');
@@ -291,6 +332,7 @@ export function checkMigrationContract(root = projectRoot) {
     assert.doesNotMatch(destructiveCheck.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' '), /\b(DROP|TRUNCATE|RENAME)\b/i, 'destructive SQL is forbidden');
     if (entry.id > manifest.historicalThrough) {
       if (reviewedTriggerMigrations.has(entry.id)) checkReviewedTriggerSql(sql, entry.id);
+      else if (reviewedFunctionReplacementContracts.has(entry.id)) checkReviewedFunctionReplacementSql(sql, entry.id);
       else if (reviewedCompatibilityContracts.has(entry.id)) checkReviewedCompatibilitySql(sql, entry.id);
       else checkAdditiveSql(sql);
     }

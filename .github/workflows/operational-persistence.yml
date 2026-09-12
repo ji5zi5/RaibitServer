@@ -6,6 +6,8 @@ on:
       - codex/raibit-operational-features
     paths:
       - prisma/migrations/202609130001_operational_persistence/migration.sql
+      - prisma/migrations/202609130002_runtime_environment_protocol/migration.sql
+      - prisma/migrations/202609130003_operational_state_dispatch/migration.sql
       - scripts/operational/persistence-preflight.mjs
       - tests/operational/fixtures/postgres-persistence-baseline.sql
       - .github/workflows/operational-persistence.yml
@@ -54,7 +56,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$RAIBITSERVER_OPERATIONAL_EVIDENCE_DIR"
-          node --test --test-concurrency=1 scripts/operational/persistence-preflight.mjs \
+          node --test --test-concurrency=1 --test-reporter=tap scripts/operational/persistence-preflight.mjs \
             2>&1 | tee "$RAIBITSERVER_OPERATIONAL_EVIDENCE_DIR/postgres-persistence.tap"
       - name: Record hosted invocation metadata
         if: always()

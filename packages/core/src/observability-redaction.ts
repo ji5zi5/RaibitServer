@@ -1,6 +1,7 @@
 export const OBSERVABILITY_LINE_BYTES = 16_384;
 export const OBSERVABILITY_RESPONSE_BYTES = 524_288;
-export type RedactionState = { readonly v: 1; readonly pem: boolean };
+type SecretQuote = '"' | "'" | '\\"' | "\\'";
+export type RedactionState = { readonly v: 1; readonly pem: boolean; readonly quote?: SecretQuote; readonly uncertain?: true };
 export type ObservationValue = null | boolean | number | string | ObservationValue[] | { [key: string]: ObservationValue };
 
 const marker = '****';
@@ -10,6 +11,7 @@ const pemBoundary = /-----(BEGIN|END) [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 // State contains no source bytes and can be atomically persisted beside the source watermark.
 export function sanitizeObservationLine(value: string, state: RedactionState = { v: 1, pem: false }) {
+  if (state.uncertain) return { line: marker, state };
   const input = boundedObservationInput(value);
   let pem = state.pem;
   const fragments: string[] = [];
@@ -30,13 +32,15 @@ export function sanitizeObservationLine(value: string, state: RedactionState = {
       if (!remaining) fragments.push(marker);
     }
   }
-  let masked = redactAssignments(redactUrlCredentials(fragments.join(''), input.truncated))
+  const assignment = redactAssignments(redactUrlCredentials(fragments.join(''), input.truncated), state.quote);
+  let masked = assignment.line
     .replace(/(^|\n)((?:Set-)?Cookie\s*:\s*)[^\r\n]*/gi, '$1$2****')
     .replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/-]+=*/gi, '$1 ****')
     .replace(/\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?|xox[baprs]-)[A-Za-z0-9_-]{12,}/g, marker);
   masked = redactJwt(masked, input.truncated);
   for (const boundary of value.matchAll(pemBoundary)) pem = boundary[1] === 'BEGIN';
-  return { line: truncateObservationText(masked + (input.truncated ? truncationSuffix : '')), state: { v: 1, pem } satisfies RedactionState };
+  const next: RedactionState = { v: 1, pem, ...assignment.state, ...(input.truncated ? { uncertain: true } as const : {}) };
+  return { line: truncateObservationText(masked + (input.truncated ? truncationSuffix : '')), state: next };
 }
 
 function boundedObservationInput(value: string): { readonly text: string; readonly truncated: boolean } {
@@ -56,7 +60,7 @@ function isKeyCharacter(value: string, index: number): boolean {
 
 function isSecretKey(value: string): boolean {
   const key = value.toLowerCase();
-  return key === 'key' || secretKeyFragments.some(fragment => key.includes(fragment));
+  return /^(?:--?)?key$/.test(key) || secretKeyFragments.some(fragment => key.includes(fragment));
 }
 
 function closingQuoteLength(value: string, index: number): number {
@@ -64,10 +68,37 @@ function closingQuoteLength(value: string, index: number): number {
   return value[index] === '"' || value[index] === "'" ? 1 : 0;
 }
 
-function redactAssignments(value: string): string {
+function secretQuoteAt(value: string, index: number): SecretQuote | undefined {
+  const pair = value.slice(index, index + 2);
+  if (pair === '\\"' || pair === "\\'") return pair;
+  const single = value[index];
+  return single === '"' || single === "'" ? single : undefined;
+}
+
+function findClosingQuote(value: string, start: number, quote: SecretQuote): number {
+  let end = start;
+  while (true) {
+    end = value.indexOf(quote, end);
+    if (end < 0) return end;
+    let slashes = 0;
+    for (let slash = end - 1; slash >= start && value[slash] === '\\'; slash--) slashes++;
+    const escaped = quote.length === 1 ? slashes % 2 === 1 : slashes % 4 === 2;
+    if (!escaped) return end;
+    end += quote.length;
+  }
+}
+
+function redactAssignments(value: string, pending?: SecretQuote): { readonly line: string; readonly state: { readonly quote?: SecretQuote } } {
   const fragments: string[] = [];
   let consumed = 0;
   let index = 0;
+  if (pending) {
+    const end = findClosingQuote(value, 0, pending);
+    if (end < 0) return { line: marker, state: { quote: pending } };
+    fragments.push(marker, pending);
+    consumed = end + pending.length;
+    index = consumed;
+  }
   while (index < value.length) {
     if (!isKeyCharacter(value, index)) { index++; continue; }
     const keyStart = index;
@@ -80,33 +111,25 @@ function redactAssignments(value: string): string {
     if (delimiter !== '=' && delimiter !== ':') { index = keyEnd; continue; }
     index++;
     while (index < value.length && /\s/u.test(value[index])) index++;
-    const quoteLength = value[index] === '\\' && value[index + 1] === '"' ? 2 : closingQuoteLength(value, index);
-    if (quoteLength > 0) {
-      const quote = value.slice(index, index + quoteLength);
-      let end = index + quoteLength;
-      while (true) {
-        end = value.indexOf(quote, end);
-        if (end < 0) break;
-        let slashes = 0;
-        for (let slash = end - 1; slash >= 0 && value[slash] === '\\'; slash--) slashes++;
-        const escaped = quote.length === 1 ? slashes % 2 === 1 : slashes % 4 === 2;
-        if (!escaped) break;
-        end += quote.length;
-      }
+    const quote = secretQuoteAt(value, index);
+    if (quote) {
+      const end = findClosingQuote(value, index + quote.length, quote);
       fragments.push(value.slice(consumed, index), quote, marker, quote);
-      consumed = end < 0 ? value.length : end + quote.length;
+      if (end < 0) return { line: fragments.join(''), state: { quote } };
+      consumed = end + quote.length;
       index = consumed;
       continue;
     }
     if (delimiter === ':') { index = keyEnd; continue; }
     const valueStart = index;
-    while (index < value.length && !/[\s"',;&]/u.test(value[index])) index++;
     const queryKey = value[keyStart - 1] === '?' || value[keyStart - 1] === '&';
+    const terminator = queryKey ? /[\s"'&]/u : /[\s"',;&]/u;
+    while (index < value.length && !terminator.test(value[index])) index++;
     if (index === valueStart && !queryKey) { index = keyEnd; continue; }
     fragments.push(value.slice(consumed, valueStart), marker);
     consumed = index;
   }
-  return fragments.join('') + value.slice(consumed);
+  return { line: fragments.join('') + value.slice(consumed), state: {} };
 }
 
 function isWordCharacter(value: string, index: number): boolean {

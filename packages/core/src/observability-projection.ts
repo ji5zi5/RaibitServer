@@ -7,7 +7,7 @@ export type ObservationLogContext = { readonly source: string; readonly rows: re
 type ProjectionOptions = {
   readonly continuation?: ObservationProjectionContinuation;
   readonly unknownLogState?: boolean;
-  // Context is request-local only.  The continuation retains only {v,pem} after a row is sent.
+  // Context is request-local; continuation retains parser state, never source bytes.
   readonly logContexts?: readonly ObservationLogContext[];
 };
 
@@ -106,7 +106,7 @@ function sanitizeLogRow(value: unknown, state: ContinuationData, unknownLogState
   if (!source) return { ...clean, line: marker };
   const current = state.sources.get(source) || contextStates.get(source);
   if (!current && state.sources.size >= MAX_LOG_SOURCES) return { ...clean, line: marker };
-  const line = sanitizeObservationLine(value.line, current || { v: 1, pem: unknownLogState });
+  const line = sanitizeObservationLine(value.line, current || { v: 1, pem: false, ...(unknownLogState ? { uncertain: true } as const : {}) });
   state.sources.set(source, line.state);
   return { ...clean, line: line.line };
 }
@@ -149,7 +149,7 @@ function logContextStates(contexts: readonly ObservationLogContext[] | undefined
     const source = typeof context.source === 'string' && context.source.length <= 1200 ? context.source : null;
     if (!source || states.has(source)) continue;
     if (!context.complete) {
-      states.set(source, { v: 1, pem: true });
+      states.set(source, { v: 1, pem: false, uncertain: true });
       continue;
     }
     let state: RedactionState = { v: 1, pem: false };

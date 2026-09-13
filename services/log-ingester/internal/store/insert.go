@@ -30,7 +30,7 @@ func (p *Postgres) Insert(ctx context.Context, records []ingester.Record, cursor
 		if prior, exists := scopes[update.Scope.DeploymentID]; exists && prior != update.Scope {
 			return 0, identity.ErrIdentity
 		}
-		if !strings.HasPrefix(update.Key, "logs:") || update.Cursor.IsZero() || len(update.State) > 256 || json.Unmarshal([]byte(update.State), &state) != nil || state.Version != 1 || (state.Quote != "" && state.Quote != "'" && state.Quote != "\"") {
+		if !strings.HasPrefix(update.Key, "logs:") || update.Cursor.IsZero() || len(update.State) > 256 || json.Unmarshal([]byte(update.State), &state) != nil || !state.Valid() || state.Watermark != update.Cursor.UTC().Format(time.RFC3339Nano) {
 			return 0, identity.ErrIdentity
 		}
 		scopes[update.Scope.DeploymentID] = update.Scope

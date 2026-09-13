@@ -31,7 +31,7 @@ for (const [name, input, expected] of cases) {
     // Then mask the entire value and preserve surrounding text without echoing it on failure.
     assert.equal(result.line.includes(canary), false, 'synthetic secret must not survive');
     assert.equal(result.line === expected, true, 'masked value and surrounding text must match');
-    assert.deepEqual(result.state, { v: 1, pem: false });
+    assert.deepEqual(result.state, { v: 1, pem: false, ...(name === 'truncated quoted value' ? { quote: '"' } : {}) });
   });
 }
 
@@ -96,9 +96,9 @@ test('derives PEM continuation state from markers beyond the bounded output pref
   // When sanitizing that line and its continuation, then state follows the complete source line.
   const started = sanitizeObservationLine(first);
   const ended = sanitizeObservationLine(`${canary}\n-----END RSA PRIVATE KEY-----`, started.state);
-  assert.deepEqual(started.state, { v: 1, pem: true });
+  assert.deepEqual(started.state, { v: 1, pem: true, uncertain: true });
   assert.equal(ended.line.includes(canary), false, 'continued PEM content must not survive');
-  assert.deepEqual(ended.state, { v: 1, pem: false });
+  assert.deepEqual(ended.state, started.state, 'discarded non-PEM tail cannot establish a known boundary');
 });
 
 test('continues masking suffixed object fields through sanitizeLogRecord', () => {
@@ -122,7 +122,7 @@ test('masks suffix-bearing legacy log lines and serialized event metadata in pro
   // Given complete runtime identity so projection actually sanitizes each line.
   const source = { serviceId: 'service-1', deploymentId: 'deployment-1', podUid: 'pod-1', containerName: 'app', timestamp: '2026-09-12T00:00:00.000Z' };
   const payload = {
-    logs: cases.map(([name, line], index) => ({ ...source, id: `log-${index}`, name, line })),
+    logs: cases.map(([name, line], index) => ({ ...source, podUid: `pod-${index}`, id: `log-${index}`, name, line })),
     events: [{ id: 'event-1', timestamp: source.timestamp, metadata: JSON.stringify({ DATABASE_PASSWORD_1: canary, ok: true }) }],
   };
   // When producing the public payload, then retain useful rows and mask all source secrets.

@@ -3,6 +3,7 @@ package ingester
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,12 @@ func (discoveryDeadlineSource) ListPods(ctx context.Context, _ string, _ int) ([
 type createdSource struct {
 	fakeSource
 	created time.Time
+}
+
+type truncatedSource struct{ fakeSource }
+
+func (s *truncatedSource) ReadLogs(_ context.Context, _ Pod, container string, _ time.Time, _ int64) ([]LogEntry, error) {
+	return s.logs[container], ErrSourceWindowLimited
 }
 
 func (s *createdSource) Verify(context.Context, Pod, identity.Scope) (time.Time, error) {
@@ -97,4 +104,104 @@ func TestIngestionAdversarialPasswordOnlyURL(t *testing.T) {
 	if got != "connected redis://:****@cache:6379/0" {
 		t.Fatal("password-only URL was not masked")
 	}
+}
+
+func TestIngestionMasksPermanentlyWhenRedactionStateIsMissingAfterRestart(t *testing.T) {
+	now := time.Date(2026, 9, 13, 1, 2, 3, 4, time.UTC)
+	for _, test := range []struct{ name, checkpoint string }{
+		{name: "missing"},
+		{name: "mismatched watermark", checkpoint: `{"v":1,"pem":false,"sequence":1,"watermark":"2026-09-13T01:02:02.000000004Z"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Given: a persisted source watermark lacks its matching atomic redaction checkpoint.
+			source := &fakeSource{pods: []Pod{{UID: "uid", Name: "pod", Containers: []string{"app"}, Labels: map[string]string{serviceLabel: "svc-1", deploymentLabel: "dep-1"}}}, logs: map[string][]LogEntry{"app": {{Timestamp: now, Line: "ready"}}}}
+			state := &fakeStore{cursors: map[string]time.Time{"logs:uid:app": now}, states: map[string]string{"logs-state:uid:app": test.checkpoint}}
+			// When: collection restarts from the persisted watermark.
+			_, err := New(Config{}, source, state).RunOnce(context.Background(), now)
+			// Then: missing parser context fails closed by persisting only a permanent mask.
+			checkpoint := state.states["logs-state:uid:app"]
+			if err != nil || state.insertCalls != 1 || len(state.records) != 1 || state.records[0].Line != "****" || !strings.Contains(checkpoint, `"uncertain":true`) || !strings.Contains(checkpoint, now.Format(time.RFC3339Nano)) {
+				t.Fatalf("restart state was not fail-closed: err=%v records=%#v state=%q", err, state.records, checkpoint)
+			}
+			t.Logf("restart_checkpoint=%s pre_insert_line=%q", checkpoint, state.records[0].Line)
+		})
+	}
+}
+
+func TestIngestionRedactsBeforeStoreInsertAcrossRestart(t *testing.T) {
+	// Given: a quoted environment secret is split across two bounded ingestion runs.
+	now := time.Date(2026, 9, 13, 1, 2, 3, 4, time.UTC)
+	source := &fakeSource{pods: []Pod{{UID: "uid", Name: "pod", Containers: []string{"app"}, Labels: map[string]string{serviceLabel: "svc-1", deploymentLabel: "dep-1"}}}, logs: map[string][]LogEntry{"app": {{Timestamp: now, Line: `POSTGRES_PASSWORD="FORBIDDEN_START`}, {Timestamp: now.Add(time.Nanosecond), Line: `FORBIDDEN_END" ready`}}}}
+	state := &fakeStore{}
+	worker := New(Config{MaxRecordsPerRun: 1, MaxLinesPerContainer: 1}, source, state)
+	// When: two independent runs persist and reload the continuation checkpoint.
+	if _, err := worker.RunOnce(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.RunOnce(context.Background(), now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Then: the RuntimeLog values handed to Store.Insert and durable state have no canary.
+	for _, record := range state.records {
+		if strings.Contains(record.Line, "FORBIDDEN") {
+			t.Fatalf("pre-insert RuntimeLog leaked: %q", record.Line)
+		}
+	}
+	for _, checkpoint := range state.states {
+		if strings.Contains(checkpoint, "FORBIDDEN") {
+			t.Fatalf("checkpoint leaked: %q", checkpoint)
+		}
+	}
+	if len(state.records) != 2 {
+		t.Fatalf("restart did not persist both rows: %d", len(state.records))
+	}
+	t.Logf("pre_insert_runtime_logs=%q,%q checkpoint=%s", state.records[0].Line, state.records[1].Line, state.states["logs-state:uid:app"])
+}
+
+func TestIngestionMarksSourceUncertainWhenReadIsTruncated(t *testing.T) {
+	// Given: Kubernetes returns complete rows followed by a discarded partial tail.
+	now := time.Date(2026, 9, 13, 1, 2, 3, 4, time.UTC)
+	source := &truncatedSource{fakeSource{pods: []Pod{{UID: "uid", Name: "pod", Containers: []string{"app"}, Labels: map[string]string{serviceLabel: "svc-1", deploymentLabel: "dep-1"}}}, logs: map[string][]LogEntry{"app": {{Timestamp: now, Line: "ready"}}}}}
+	state := &fakeStore{}
+	// When: the complete prefix is accepted despite the truncated source window.
+	_, err := New(Config{}, source, state).RunOnce(context.Background(), now)
+	// Then: its durable checkpoint becomes permanently uncertain before another read.
+	checkpoint := state.states["logs-state:uid:app"]
+	if err != nil || state.records[0].Line != "****" || !strings.Contains(checkpoint, `"uncertain":true`) {
+		t.Fatalf("truncation was not fail-closed: err=%v row=%#v state=%q", err, state.records, checkpoint)
+	}
+	t.Logf("source_limited=true pre_insert_line=%q checkpoint=%s", state.records[0].Line, checkpoint)
+}
+
+func TestIngestionMasksColdStartWithoutParserCheckpoint(t *testing.T) {
+	// Given: the first retained source row may continue a quote that began before observation.
+	now := time.Date(2026, 9, 13, 1, 2, 3, 4, time.UTC)
+	source := &fakeSource{pods: []Pod{{UID: "uid", Name: "pod", Containers: []string{"app"}, Labels: map[string]string{serviceLabel: "svc-1", deploymentLabel: "dep-1"}}}, logs: map[string][]LogEntry{"app": {{Timestamp: now, Line: `AuditSyntheticValue_97531" ready`}}}}
+	state := &fakeStore{}
+	// When: collection starts with neither source cursor nor parser checkpoint.
+	_, err := New(Config{}, source, state).RunOnce(context.Background(), now)
+	// Then: the first RuntimeLog handed to Store.Insert is fail-closed and state stays uncertain.
+	checkpoint := state.states["logs-state:uid:app"]
+	if err != nil || len(state.records) != 1 || state.records[0].Line != "****" || !strings.Contains(checkpoint, `"uncertain":true`) {
+		t.Fatalf("cold start trusted absent context: err=%v records=%#v state=%q", err, state.records, checkpoint)
+	}
+	t.Logf("cold_start=true pre_insert_line=%q checkpoint=%s", state.records[0].Line, checkpoint)
+}
+
+func TestIngestionMasksWhenRetentionClampSkipsCheckpointPosition(t *testing.T) {
+	// Given: parser state matches an old cursor, but retention moves the actual read start forward.
+	now := time.Date(2026, 9, 13, 1, 2, 3, 4, time.UTC)
+	oldCursor := now.Add(-8 * 24 * time.Hour)
+	readStart := now.Add(-7 * 24 * time.Hour)
+	source := &fakeSource{pods: []Pod{{UID: "uid", Name: "pod", Containers: []string{"app"}, Labels: map[string]string{serviceLabel: "svc-1", deploymentLabel: "dep-1"}}}, logs: map[string][]LogEntry{"app": {{Timestamp: readStart, Line: `AuditSyntheticValue_97531" ready`}}}}
+	checkpoint := `{"v":1,"pem":false,"sequence":1,"watermark":"` + oldCursor.Format(time.RFC3339Nano) + `"}`
+	state := &fakeStore{cursors: map[string]time.Time{"logs:uid:app": oldCursor}, states: map[string]string{"logs-state:uid:app": checkpoint}}
+	// When: retention clamps ReadLogs beyond the validated checkpoint position.
+	_, err := New(Config{Retention: 7 * 24 * time.Hour}, source, state).RunOnce(context.Background(), now)
+	// Then: skipped parser context invalidates state before the first RuntimeLog is produced.
+	checkpoint = state.states["logs-state:uid:app"]
+	if err != nil || len(state.records) != 1 || state.records[0].Line != "****" || !strings.Contains(checkpoint, `"uncertain":true`) || !strings.Contains(checkpoint, readStart.Format(time.RFC3339Nano)) {
+		t.Fatalf("retention gap trusted stale context: err=%v records=%#v state=%q", err, state.records, checkpoint)
+	}
+	t.Logf("retention_clamped=true pre_insert_line=%q checkpoint=%s", state.records[0].Line, checkpoint)
 }

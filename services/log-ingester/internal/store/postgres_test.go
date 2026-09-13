@@ -63,7 +63,8 @@ func (h harness) batch(line string) ([]ingester.Record, []ingester.CursorUpdate)
 	uid := h.scope.DeploymentID
 	sum := sha256.Sum256([]byte(uid + "\x00web\x00" + h.now.Format(time.RFC3339Nano) + "\x00" + line))
 	key := hex.EncodeToString(sum[:])
-	return []ingester.Record{{Scope: h.scope, SourceKey: key, ServiceID: h.scope.ServiceID, DeploymentID: h.scope.DeploymentID, PodName: "pod", PodUID: uid, ContainerName: "web", Line: line, Level: "info", Timestamp: h.now}}, []ingester.CursorUpdate{{Scope: h.scope, Key: "logs:" + uid + ":web", Cursor: h.now, State: `{"v":1,"pem":false,"sequence":1}`}}
+	state := `{"v":1,"pem":false,"sequence":1,"watermark":"` + h.now.Format(time.RFC3339Nano) + `"}`
+	return []ingester.Record{{Scope: h.scope, SourceKey: key, ServiceID: h.scope.ServiceID, DeploymentID: h.scope.DeploymentID, PodName: "pod", PodUID: uid, ContainerName: "web", Line: line, Level: "info", Timestamp: h.now}}, []ingester.CursorUpdate{{Scope: h.scope, Key: "logs:" + uid + ":web", Cursor: h.now, State: state}}
 }
 
 func assertEmpty(t *testing.T, h harness) {
@@ -73,6 +74,22 @@ func assertEmpty(t *testing.T, h harness) {
 	if err != nil || rows != 0 || cursors != 0 {
 		t.Fatalf("atomic rollback violated: rows=%d cursors=%d err=%v", rows, cursors, err)
 	}
+}
+
+func TestInsertRejectsCheckpointWatermarkMismatchBeforeDatabase(t *testing.T) {
+	// Given: a structurally valid row is paired with a state watermark from another source position.
+	now := time.Date(2026, 9, 13, 1, 2, 3, 4, time.UTC)
+	scope := identity.Scope{ServiceID: "service", DeploymentID: "deployment", Container: "web"}
+	hash := sha256.Sum256([]byte("source"))
+	records := []ingester.Record{{Scope: scope, SourceKey: hex.EncodeToString(hash[:]), ServiceID: scope.ServiceID, DeploymentID: scope.DeploymentID, PodName: "pod", PodUID: "uid", ContainerName: "web", Line: "ready", Level: "info", Timestamp: now}}
+	updates := []ingester.CursorUpdate{{Scope: scope, Key: "logs:uid:web", Cursor: now, State: `{"v":1,"pem":false,"sequence":1,"watermark":"2026-09-13T01:02:02.000000004Z"}`}}
+	// When: Insert validates the source-to-storage contract before opening a transaction.
+	_, err := (&Postgres{}).Insert(context.Background(), records, updates)
+	// Then: mismatched state cannot reach RuntimeLog persistence.
+	if !errors.Is(err, identity.ErrIdentity) {
+		t.Fatalf("watermark mismatch reached database: %v", err)
+	}
+	t.Log("database_opened=false watermark_mismatch_rejected=true")
 }
 
 func TestIngestionAdversarialPostgresLifecycleRecheck(t *testing.T) {

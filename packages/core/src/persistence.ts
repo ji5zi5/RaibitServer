@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { appendPrismaObservationLog } from './observability-writes.ts';
 import { ResourceRecoveryRepository, type RecoveryQuotaPolicy } from './resource-recovery.ts';
 import { MemoryRecoveryTransaction } from './resource-recovery-memory.ts';
 import { PostgresRecoveryTransaction, lockRecoveryDeletion, assertPostgresRecoveryPublished } from './resource-recovery-postgres.ts';
@@ -2414,14 +2415,14 @@ export class PrismaControlPlaneRepository {
   }
 
   async appendBuildLog(input: Record<string, any>) {
-    return this.prisma.buildLog.create({ data: { deploymentId: input.deploymentId, step: input.step || 'build', line: maskLogLine(input.line), level: input.level || 'info' } });
+    return appendPrismaObservationLog(this.prisma, { kind: 'build', data: { deploymentId: input.deploymentId, step: input.step || 'build', line: String(input.line ?? ''), level: input.level || 'info' } });
   }
 
   async appendRuntimeLog(input: Record<string, any>) {
     const podName = input.podName || 'local-pod';
     const containerName = input.containerName || 'app';
     const podUid = persistedRuntimePodUid({ podUid: input.podUid, sourceInstanceId: input.sourceInstanceId });
-    return this.prisma.runtimeLog.create({ data: { serviceId: input.serviceId, deploymentId: input.deploymentId || null, podName, podUid, containerName, line: maskLogLine(input.line), level: input.level || 'info' } });
+    return appendPrismaObservationLog(this.prisma, { kind: 'runtime', data: { serviceId: input.serviceId, deploymentId: input.deploymentId || null, podName, podUid, containerName, line: String(input.line ?? ''), level: input.level || 'info' } });
   }
 
   async appendDeploymentEvent(input: Record<string, any>) {

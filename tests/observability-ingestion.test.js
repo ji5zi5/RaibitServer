@@ -34,7 +34,7 @@ test('ingestion adversarial matrix persists nonsecret PEM continuation across re
   // Given split records and a JSON-roundtripped continuation.
   assert.equal(typeof observability.sanitizeObservationLine, 'function');
   let state = {v:1,pem:false};
-  for (const record of fixture.streams[0].records) {
+  for (const record of fixture.streams.find(stream => stream.name === 'pem-restart').records) {
     // When the next source record resumes after restart.
     const result = observability.sanitizeObservationLine(record.input, JSON.parse(JSON.stringify(state)));
     // Then only boolean context survives, never private bytes.

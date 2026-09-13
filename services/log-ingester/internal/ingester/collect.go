@@ -16,23 +16,34 @@ import (
 
 func (i *Ingester) collect(ctx context.Context, target logTarget, input collection) ([]Record, CursorUpdate, bool, error) {
 	key := "logs:" + target.pod.UID + ":" + target.container
-	since, err := i.store.Cursor(ctx, key)
+	sourceCursor, err := i.store.Cursor(ctx, key)
 	if err != nil {
 		return nil, CursorUpdate{}, false, err
 	}
-	since = maxTime(since, input.now.Add(-i.config.Retention))
+	since := maxTime(sourceCursor, input.now.Add(-i.config.Retention))
 	stateRaw, err := i.store.State(ctx, "logs-state:"+target.pod.UID+":"+target.container)
 	if err != nil {
 		return nil, CursorUpdate{}, false, err
 	}
 	state := redact.State{Version: 1}
-	if stateRaw != "" && (len(stateRaw) > 256 || json.Unmarshal([]byte(stateRaw), &state) != nil || state.Version != 1 || (state.Quote != "" && state.Quote != "\"" && state.Quote != "'")) {
+	if stateRaw != "" && (len(stateRaw) > 256 || json.Unmarshal([]byte(stateRaw), &state) != nil || !state.Valid()) {
 		return nil, CursorUpdate{}, false, ErrCursorConflict
 	}
+	wantWatermark := ""
+	if !sourceCursor.IsZero() {
+		wantWatermark = sourceCursor.UTC().Format(time.RFC3339Nano)
+	}
+	if sourceCursor.IsZero() || !sourceCursor.Equal(since) || wantWatermark != state.Watermark {
+		state = redact.State{Version: 1, Uncertain: true, Sequence: state.Sequence, Watermark: wantWatermark}
+	}
 	entries, err := i.source.ReadLogs(ctx, target.pod, target.container, since, i.config.MaxReadBytes)
-	limited := errors.Is(err, ErrSourceWindowLimited)
+	sourceLimited := errors.Is(err, ErrSourceWindowLimited)
+	limited := sourceLimited
 	if err != nil && !limited {
 		return nil, CursorUpdate{}, false, err
+	}
+	if sourceLimited {
+		state.Uncertain = true
 	}
 	// A Pod recreated between identity GET and its log GET cannot supply this batch.
 	created, err := i.source.Verify(ctx, target.pod, target.scope)
@@ -85,6 +96,7 @@ func (i *Ingester) collect(ctx context.Context, target logTarget, input collecti
 	if len(rows) == 0 {
 		return nil, CursorUpdate{}, limited, nil
 	}
+	state.Watermark = next.UTC().Format(time.RFC3339Nano)
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return nil, CursorUpdate{}, false, err

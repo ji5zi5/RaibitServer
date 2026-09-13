@@ -8,6 +8,81 @@
   },
   "cases": [
     {
+      "name": "query-value-;",
+      "input": "https://example.test/?token=alpha;AuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "query-value-,",
+      "input": "https://example.test/?token=alpha,AuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "query-value-#",
+      "input": "https://example.test/?token=alpha#AuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "query-value-%3B",
+      "input": "https://example.test/?token=alpha%3BAuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "query-value-%2C",
+      "input": "https://example.test/?token=alpha%2CAuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "query-value-%23",
+      "input": "https://example.test/?token=alpha%23AuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "query-value-%26",
+      "input": "https://example.test/?token=alpha%26AuditSyntheticValue_97531&page=1",
+      "expected": "https://example.test/?token=****&page=1"
+    },
+    {
+      "name": "secret-key---key",
+      "input": "tool --key=AuditSyntheticValue_97531 --verbose",
+      "expected": "tool --key=**** --verbose"
+    },
+    {
+      "name": "secret-key--key",
+      "input": "tool -key=AuditSyntheticValue_97531 --verbose",
+      "expected": "tool -key=**** --verbose"
+    },
+    {
+      "name": "secret-key-KEY",
+      "input": "tool KEY=AuditSyntheticValue_97531 --verbose",
+      "expected": "tool KEY=**** --verbose"
+    },
+    {
+      "name": "secret-key-POSTGRES_PASSWORD",
+      "input": "tool POSTGRES_PASSWORD=AuditSyntheticValue_97531 --verbose",
+      "expected": "tool POSTGRES_PASSWORD=**** --verbose"
+    },
+    {
+      "name": "secret-key-DATABASE_PASSWORD_1",
+      "input": "tool DATABASE_PASSWORD_1=AuditSyntheticValue_97531 --verbose",
+      "expected": "tool DATABASE_PASSWORD_1=**** --verbose"
+    },
+    {
+      "name": "secret-key-APP_CREDENTIAL_SECONDARY",
+      "input": "tool APP_CREDENTIAL_SECONDARY=AuditSyntheticValue_97531 --verbose",
+      "expected": "tool APP_CREDENTIAL_SECONDARY=**** --verbose"
+    },
+    {
+      "name": "serialized-cli-key",
+      "input": "{\"--key\":\"AuditSyntheticValue_97531\"}",
+      "expected": "{\"--key\":\"****\"}"
+    },
+    {
+      "name": "benign-key-neighbors",
+      "input": "keyboard=us monkey=banana KEY_VERSION=2",
+      "expected": "keyboard=us monkey=banana KEY_VERSION=2"
+    },
+    {
       "name": "assignment",
       "input": "PASSWORD=FORBIDDEN_ASSIGN ready",
       "expected": "PASSWORD=**** ready"
@@ -89,6 +164,114 @@
     }
   ],
   "streams": [
+    {
+      "name": "quoted-restart-\"\\\"\"",
+      "records": [
+        {
+          "input": "POSTGRES_PASSWORD=\"begin",
+          "expected": "POSTGRES_PASSWORD=\"****\"",
+          "pemAfter": false,
+          "quoteAfter": "\""
+        },
+        {
+          "input": "AuditSyntheticValue_97531",
+          "expected": "****",
+          "pemAfter": false,
+          "quoteAfter": "\""
+        },
+        {
+          "input": "end\" ready=true",
+          "expected": "****\" ready=true",
+          "pemAfter": false
+        },
+        {
+          "input": "ready",
+          "expected": "ready",
+          "pemAfter": false
+        }
+      ]
+    },
+    {
+      "name": "quoted-restart-\"'\"",
+      "records": [
+        {
+          "input": "POSTGRES_PASSWORD='begin",
+          "expected": "POSTGRES_PASSWORD='****'",
+          "pemAfter": false,
+          "quoteAfter": "'"
+        },
+        {
+          "input": "AuditSyntheticValue_97531",
+          "expected": "****",
+          "pemAfter": false,
+          "quoteAfter": "'"
+        },
+        {
+          "input": "end' ready=true",
+          "expected": "****' ready=true",
+          "pemAfter": false
+        },
+        {
+          "input": "ready",
+          "expected": "ready",
+          "pemAfter": false
+        }
+      ]
+    },
+    {
+      "name": "quoted-restart-\"\\\\\\\"\"",
+      "records": [
+        {
+          "input": "POSTGRES_PASSWORD=\\\"begin",
+          "expected": "POSTGRES_PASSWORD=\\\"****\\\"",
+          "pemAfter": false,
+          "quoteAfter": "\\\""
+        },
+        {
+          "input": "AuditSyntheticValue_97531",
+          "expected": "****",
+          "pemAfter": false,
+          "quoteAfter": "\\\""
+        },
+        {
+          "input": "end\\\" ready=true",
+          "expected": "****\\\" ready=true",
+          "pemAfter": false
+        },
+        {
+          "input": "ready",
+          "expected": "ready",
+          "pemAfter": false
+        }
+      ]
+    },
+    {
+      "name": "quoted-restart-\"\\\\'\"",
+      "records": [
+        {
+          "input": "POSTGRES_PASSWORD=\\'begin",
+          "expected": "POSTGRES_PASSWORD=\\'****\\'",
+          "pemAfter": false,
+          "quoteAfter": "\\'"
+        },
+        {
+          "input": "AuditSyntheticValue_97531",
+          "expected": "****",
+          "pemAfter": false,
+          "quoteAfter": "\\'"
+        },
+        {
+          "input": "end\\' ready=true",
+          "expected": "****\\' ready=true",
+          "pemAfter": false
+        },
+        {
+          "input": "ready",
+          "expected": "ready",
+          "pemAfter": false
+        }
+      ]
+    },
     {
       "name": "pem-restart",
       "records": [

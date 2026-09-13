@@ -103,6 +103,12 @@ jobs:
         run: node --test tests/postgres-oauth-transaction.test.js
         env:
           RAIBITSERVER_REQUIRE_POSTGRES_TESTS: '1'
+      - name: Require log redaction storage and restart verification
+        run: |
+          node --import ./tests/fixtures/resource-runtime.mjs --test tests/postgres-observability-redaction-writes.test.js
+          (cd services/log-ingester && go test -race -count=1 ./internal/redact ./internal/ingester ./internal/store)
+        env:
+          RAIBITSERVER_REQUIRE_POSTGRES_TESTS: '1'
       - name: Resource capability and preview/live PostgreSQL boundary
         run: node --import ./tests/fixtures/resource-runtime.mjs --test tests/resource-capability-boundary.test.js
         env:

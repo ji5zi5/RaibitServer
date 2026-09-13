@@ -28,6 +28,7 @@ import { createPreviewRuntime, PREVIEW_RESOLVER_JOB, previewCloseIntent, resolve
 import { normalizeAccountType } from './identity.ts';
 import { nextProjectUpdatedAt, ProjectSettingsError, projectSettingsView, scheduledProjectDeletion, type ProjectDeletionRequest, type ProjectSettingsMutation } from './project-settings.ts';
 import { observationLogSource, persistedRuntimePodUid, type ObservationLogContext } from './observability-projection.ts';
+import { maskMemoryObservationLine } from './observability-writes.ts';
 import type { PasswordRecoveryCompletionInput, PasswordRecoveryDeliveryFailureInput } from './password-recovery.ts';
 import { membershipRoleTransition, normalizeOrganizationRoleForRead, parseOrganizationMembershipRoleForMutation, parseOrganizationRouteSlug, type OrganizationMembershipRole } from './rbac.ts';
 import { acceptMemoryOrganizationInvite, listMemoryOrganizationInvites, replaceMemoryOrganizationInvite, revokeMemoryOrganizationInviteAfterDeliveryFailure } from './organization-invite-memory.ts';
@@ -959,14 +960,14 @@ export class ControlPlaneStore {
   }
 
   appendBuildLog({ deploymentId, step = 'build', line, level = 'info' }: Record<string, any>) {
-    const row = { id: stableId('blog', deploymentId, this.buildLogs.length), deploymentId, step, line: sanitizeLogRecord(String(line ?? '')), level, timestamp: nowIso() };
+    const row = { id: stableId('blog', deploymentId, this.buildLogs.length), deploymentId, step, line: maskMemoryObservationLine(this, ['build', deploymentId, step], String(line ?? '')), level, timestamp: nowIso() };
     this.buildLogs.push(row);
     return deepClone(row);
   }
 
   appendRuntimeLog({ serviceId, deploymentId = null, podName = 'local-pod', podUid, sourceInstanceId, containerName = 'app', line, level = 'info' }: Record<string, any>) {
     const resolvedPodUid = persistedRuntimePodUid({ podUid, sourceInstanceId });
-    const row = { id: stableId('rlog', serviceId, this.runtimeLogs.length), serviceId, deploymentId, podName, podUid: resolvedPodUid, containerName, line: sanitizeLogRecord(String(line ?? '')), level, timestamp: nowIso() };
+    const row = { id: stableId('rlog', serviceId, this.runtimeLogs.length), serviceId, deploymentId, podName, podUid: resolvedPodUid, containerName, line: maskMemoryObservationLine(this, ['runtime', serviceId, deploymentId, resolvedPodUid, containerName], String(line ?? '')), level, timestamp: nowIso() };
     this.runtimeLogs.push(row);
     return deepClone(row);
   }

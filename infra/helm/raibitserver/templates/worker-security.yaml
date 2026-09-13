@@ -1521,7 +1521,8 @@ spec:
           (key in oldObject.metadata.labels && oldObject.metadata.labels[key] == object.metadata.labels[key])) &&
         object.metadata.name == oldObject.metadata.name &&
         object.metadata.uid == oldObject.metadata.uid &&
-        object.metadata.annotations == oldObject.metadata.annotations &&
+        ((!has(oldObject.metadata.annotations) && !has(object.metadata.annotations)) ||
+         (has(oldObject.metadata.annotations) && has(object.metadata.annotations) && object.metadata.annotations == oldObject.metadata.annotations)) &&
         object.metadata.ownerReferences == oldObject.metadata.ownerReferences &&
         ((!has(oldObject.metadata.finalizers) && !has(object.metadata.finalizers)) ||
          (has(oldObject.metadata.finalizers) && has(object.metadata.finalizers) && object.metadata.finalizers == oldObject.metadata.finalizers)) &&

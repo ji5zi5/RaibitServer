@@ -204,6 +204,13 @@ kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_
 provider_uid="$(kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get pod native-provider-0 -o jsonpath='{.metadata.uid}')"
 provider_version="$(kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get pod native-provider-0 -o jsonpath='{.metadata.resourceVersion}')"
 provider_bind_patch="$(jq -nc --arg uid "${provider_uid}" --arg version "${provider_version}" --arg authority "${cancel_authority}" '[{"op":"test","path":"/metadata/uid","value":$uid},{"op":"test","path":"/metadata/resourceVersion","value":$version},{"op":"add","path":"/metadata/labels/raibitserver.io~1recovery-authority","value":$authority}]')"
+annotation_mutation="$(jq -c '. + [{"op":"add","path":"/metadata/annotations","value":{"native.raibitserver.io/forbidden":"changed"}}]' <<<"${provider_bind_patch}")"
+if kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --as "${PROVISIONER_USER}" --namespace "${TENANT_NAMESPACE}" \
+  patch pod/native-provider-0 --type=json -p "${annotation_mutation}" >"${EVIDENCE_DIR}/provider-annotation-mutation.stdout" 2>"${EVIDENCE_DIR}/provider-annotation-mutation.stderr"; then
+  echo "recovery authority update unexpectedly changed provider annotations" >&2
+  exit 1
+fi
+grep -F "${FULLNAME}-provisioner-recovery-provider-pods" "${EVIDENCE_DIR}/provider-annotation-mutation.stderr"
 kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --as "${PROVISIONER_USER}" --namespace "${TENANT_NAMESPACE}" \
   patch pod/native-provider-0 --type=json -p "${provider_bind_patch}" -o json >"${EVIDENCE_DIR}/cancel-provider-bound.json"
 

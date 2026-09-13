@@ -106,6 +106,10 @@ jobs:
       - name: Require log redaction storage and restart verification
         run: |
           node --import ./tests/fixtures/resource-runtime.mjs --test tests/postgres-observability-redaction-writes.test.js
+          binary_dir="$(mktemp -d)"
+          trap 'rm -f "$binary_dir/log-ingester"; rmdir "$binary_dir"' EXIT
+          (cd services/log-ingester && go build -o "$binary_dir/log-ingester" ./cmd/log-ingester)
+          export RAIBITSERVER_TEST_BINARY="$binary_dir/log-ingester"
           (cd services/log-ingester && go test -race -count=1 ./internal/redact ./internal/ingester ./internal/store)
         env:
           RAIBITSERVER_REQUIRE_POSTGRES_TESTS: '1'

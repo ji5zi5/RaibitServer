@@ -174,12 +174,18 @@ metadata:
   namespace: ${TENANT_NAMESPACE}
 spec:
   serviceName: native-provider
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels: { app.kubernetes.io/name: native-provider }
   template:
     metadata:
-      labels: { app.kubernetes.io/name: native-provider }
+      labels:
+        app.kubernetes.io/name: native-provider
+        app.kubernetes.io/managed-by: raibitserver
+        raibitserver.io/managed: "true"
+        raibitserver.io/project-id: project-1
+        raibitserver.io/resource-id: resource-1
+        raibitserver.io/provider: postgresql
     spec:
       automountServiceAccountToken: false
       containers:
@@ -193,42 +199,8 @@ spec:
             seccompProfile: { type: RuntimeDefault }
 EOF
 kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s create -f "${WORK_DIR}/cancel-provider-statefulset.yaml"
-provider_owner_uid="$(kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get statefulset native-provider -o jsonpath='{.metadata.uid}')"
-cat >"${WORK_DIR}/cancel-provider-pod.yaml" <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: native-provider-0
-  namespace: ${TENANT_NAMESPACE}
-  labels:
-    app.kubernetes.io/name: native-provider
-    app.kubernetes.io/managed-by: raibitserver
-    raibitserver.io/managed: "true"
-    raibitserver.io/project-id: project-1
-    raibitserver.io/resource-id: resource-1
-    raibitserver.io/provider: postgresql
-  annotations: { native.raibitserver.io/fixture: cancel }
-  ownerReferences:
-    - apiVersion: apps/v1
-      kind: StatefulSet
-      name: native-provider
-      uid: ${provider_owner_uid}
-      controller: true
-spec:
-  automountServiceAccountToken: false
-  restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65532
-    seccompProfile: { type: RuntimeDefault }
-  containers:
-    - name: provider
-      image: registry.k8s.io/pause:3.10
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities: { drop: ["ALL"] }
-EOF
-kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s create -f "${WORK_DIR}/cancel-provider-pod.yaml"
+kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" \
+  rollout status statefulset/native-provider --timeout=90s
 provider_uid="$(kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get pod native-provider-0 -o jsonpath='{.metadata.uid}')"
 provider_version="$(kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get pod native-provider-0 -o jsonpath='{.metadata.resourceVersion}')"
 provider_bind_patch="$(jq -nc --arg uid "${provider_uid}" --arg version "${provider_version}" --arg authority "${cancel_authority}" '[{"op":"test","path":"/metadata/uid","value":$uid},{"op":"test","path":"/metadata/resourceVersion","value":$version},{"op":"add","path":"/metadata/labels/raibitserver.io~1recovery-authority","value":$authority}]')"

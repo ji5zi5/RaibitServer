@@ -22,6 +22,7 @@ PROBE_GOOS=$("$GO" env GOOS)
 case "$NODE" in *.exe) PROBE_GOOS=windows ;; esac
 (cd "$ROOT_DIR/tests/fixtures/provisioner-admission-cel" && GOOS="$PROBE_GOOS" "$GO" build -mod=readonly -o "$PROBE_DIR/cel-evaluate.exe" .)
 (cd "$ROOT_DIR/services/provisioner" && "$GO" test ./internal/backup -run '^Test_RecoveryNetworkPolicyManifest_emits_admission_fixture$' -count=1 -v) >"$PROBE_DIR/generated.log"
+(cd "$ROOT_DIR/services/provisioner" && "$GO" test ./internal/command -run '^TestRecoveryUIDDeletesUseBackgroundPropagationAndAcceptAsyncResponse$' -count=1 -v) >"$PROBE_DIR/delete-options.log"
 sed -n 's/^.*BOUNDARY_FIXTURE=//p' "$PROBE_DIR/generated.log" >"$PROBE_DIR/recovery.json"
 test -s "$PROBE_DIR/recovery.json"
 

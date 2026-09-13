@@ -39,6 +39,13 @@ Runtime workload policy는 다음을 차단합니다.
 - API snapshot과 log는 secret-looking key/value를 masking합니다.
 - CLI auth-token command는 token 발급 목적상 예외이며, 그 외 출력은 masking합니다.
 
+### 여러 줄 로그와 복구 작업 정리
+
+- Go 수집기와 TypeScript 저장 경로는 소스별 PEM·따옴표 상태를 이어서 적용합니다. PostgreSQL에서는 마스킹된 로그와 비밀값을 포함하지 않는 파서 상태를 같은 트랜잭션으로 저장합니다.
+- 이전 상태가 없거나 수집 위치와 맞지 않거나 입력이 잘려 상태를 복원할 수 없으면 해당 소스 내용을 보수적으로 가립니다. 따라서 일부 로그가 `****`만 표시될 수 있습니다. 마스킹을 끄거나 원문을 출력하는 방식으로 해결하지 마세요.
+- URL의 비밀 쿼리값은 쉼표·세미콜론 뒤까지 가립니다. `--key`, `-key`, 접두·접미사가 붙은 비밀 환경변수도 같은 보호 대상입니다.
+- 복구 작업의 DELETE 접수는 실행 종료를 뜻하지 않습니다. Job과 해당 UID의 Pod가 사라졌음을 확인하기 전에는 네트워크 정책, 자격증명 스냅샷, 복구 권한을 해제하지 않습니다. 삭제나 확인에 실패하면 보호 장치를 유지하고 오류를 반환합니다.
+
 ## DB console guard
 
 - destructive SQL은 explicit confirmation이 필요합니다.

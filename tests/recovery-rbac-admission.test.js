@@ -306,3 +306,12 @@ test('generic garbage collector may only remove the foreground finalizer from a 
   addedGenerateName.metadata.generateName = 'recovery-job-';
   assert.equal(allowsGarbageCollectorFinalizerRemoval('system:kube-controller-manager', before, addedGenerateName), false);
 });
+
+test('admission verification locks background recovery deletes and leaves terminal-only GC finalization intact', () => {
+  const script = readFileSync('scripts/verify-provisioner-admission.sh', 'utf8');
+  const policyText = compact(documentNamed('provisioner-recovery-jobs', 'ValidatingAdmissionPolicy'));
+
+  assert.match(script, /TestRecoveryUIDDeletesUseBackgroundPropagationAndAcceptAsyncResponse/);
+  assert.match(policyText, /condition\.type in \['Complete', 'Failed'\].*condition\.status == 'True'/);
+  assert.equal((policyText.match(/condition\.type in \['Complete', 'Failed'\]/g) ?? []).length, 2);
+});

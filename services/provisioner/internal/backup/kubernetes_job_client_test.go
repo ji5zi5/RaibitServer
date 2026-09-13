@@ -85,6 +85,9 @@ func (f *fakeRecoveryCommands) RunSensitiveOutput(ctx context.Context, _ string,
 		return "kubectl get secret", nil, &command.KubernetesAPIError{StatusCode: 403}
 	case "pods":
 		if strings.Contains(strings.Join(args, " "), "job-name=") {
+			if strings.Contains(strings.Join(f.deleted, ","), "job/") {
+				return "kubectl get pods", mustJSON(map[string]any{"apiVersion": "v1", "kind": "PodList", "items": []any{}}), nil
+			}
 			return "kubectl get pods", mustJSON(map[string]any{"items": f.recoveryJobPods()}), nil
 		}
 		return "kubectl get pods", mustJSON(map[string]any{"items": []any{f.providerPod("31", "")}}), nil
@@ -108,6 +111,9 @@ func (f *fakeRecoveryCommands) RunSensitiveOutput(ctx context.Context, _ string,
 			return "kubectl get secret", nil, &command.KubernetesAPIError{StatusCode: 403}
 		}
 		if strings.HasPrefix(args[1], "job/") {
+			if strings.Contains(strings.Join(f.deleted, ","), "job/") {
+				return "kubectl get job", nil, command.ErrObjectNotFound
+			}
 			manifest := f.created[len(f.created)-1]
 			metadata := manifest["metadata"].(map[string]any)
 			spec := manifest["spec"].(map[string]any)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -72,12 +73,33 @@ func Test_CommandKubernetesJobClient_cancelled_transfer_still_cleans_with_live_b
 	if !errors.Is(runErr, context.Canceled) || len(commands.deleted) != 0 {
 		t.Fatalf("pre-create cancellation deletes=%v err=%v", commands.deleted, runErr)
 	}
-	commands = &fakeRecoveryCommands{job: job, streamErr: context.Canceled}
-	client, _ = NewCommandKubernetesJobClient(commands, time.Minute)
-	runner, _ = NewKubernetesJobRunner(client)
-	handoff, _ = NewDumpHandoff(context.Background(), &countingWriteCloser{}, 16)
-	if _, runErr = handoff.Execute(context.Background(), job, runner); !errors.Is(runErr, context.Canceled) || len(commands.deleted) != 3 || commands.cleanupSawCanceled || !commands.cleanupSawDeadline || !commands.authorityReleased {
-		t.Fatalf("deletes=%v canceledCleanup=%v deadline=%v authorityReleased=%v err=%v", commands.deleted, commands.cleanupSawCanceled, commands.cleanupSawDeadline, commands.authorityReleased, runErr)
+	for _, scenario := range []struct {
+		name    string
+		binding StreamBinding
+	}{
+		{name: "log stream failure", binding: StreamStdout},
+		{name: "attach stream failure", binding: StreamStdin},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			connection := testNetworkConnection(t, "source", "source.db.internal", "source-secret", "DATABASE_URL", "16.4")
+			job, jobErr := NewIsolatedJob(testJobSpec(t, connection, scenario.binding))
+			if jobErr != nil {
+				t.Fatal(jobErr)
+			}
+			commands := &fakeRecoveryCommands{job: job, streamErr: context.Canceled}
+			client, _ := NewCommandKubernetesJobClient(commands, time.Minute)
+			runner, _ := NewKubernetesJobRunner(client)
+			var handoff *StreamHandoff
+			if scenario.binding == StreamStdout {
+				handoff, _ = NewDumpHandoff(context.Background(), &countingWriteCloser{}, 16)
+			} else {
+				handoff, _ = NewRestoreHandoff(context.Background(), io.NopCloser(strings.NewReader("dump")), 16)
+			}
+			_, runErr := handoff.Execute(context.Background(), job, runner)
+			if !errors.Is(runErr, context.Canceled) || len(commands.deleted) != 3 || commands.cleanupSawCanceled || !commands.cleanupSawDeadline || !commands.authorityReleased {
+				t.Fatalf("deletes=%v canceledCleanup=%v deadline=%v authorityReleased=%v err=%v", commands.deleted, commands.cleanupSawCanceled, commands.cleanupSawDeadline, commands.authorityReleased, runErr)
+			}
+		})
 	}
 }
 
@@ -94,6 +116,63 @@ func Test_CommandKubernetesJobClient_cancelled_authority_patch_releases_server_a
 	_, runErr := handoff.Execute(context.Background(), job, runner)
 	if !errors.Is(runErr, context.Canceled) || len(commands.deleted) != 1 || commands.cleanupSawCanceled || !commands.cleanupSawDeadline || !commands.authorityReleased {
 		t.Fatalf("deletes=%v canceledCleanup=%v deadline=%v authorityReleased=%v err=%v", commands.deleted, commands.cleanupSawCanceled, commands.cleanupSawDeadline, commands.authorityReleased, runErr)
+	}
+}
+
+func Test_CommandKubernetesJobClient_cleanup_preserves_protections_until_job_and_pods_stop(t *testing.T) {
+	connection := testNetworkConnection(t, "source", "source.db.internal", "source-secret", "DATABASE_URL", "16.4")
+	job, err := NewIsolatedJob(testJobSpec(t, connection, StreamStdout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []struct {
+		name               string
+		jobDeleteErr       error
+		jobDeleteWaitErr   error
+		recoveryPodsRemain bool
+	}{
+		{name: "delete transport failure", jobDeleteErr: context.DeadlineExceeded},
+		{name: "accepted delete remains pending", jobDeleteWaitErr: context.DeadlineExceeded},
+		{name: "job absent while pod remains", recoveryPodsRemain: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			commands := &cleanupLifecycleCommands{
+				fakeRecoveryCommands: &fakeRecoveryCommands{job: job},
+				jobDeleteErr:         scenario.jobDeleteErr, jobDeleteWaitErr: scenario.jobDeleteWaitErr,
+				recoveryPodsRemain: scenario.recoveryPodsRemain,
+			}
+			client, clientErr := NewCommandKubernetesJobClient(commands, time.Minute)
+			if clientErr != nil {
+				t.Fatal(clientErr)
+			}
+			runner, _ := NewKubernetesJobRunner(client)
+			handoff, _ := NewDumpHandoff(context.Background(), &countingWriteCloser{}, 16)
+
+			_, runErr := handoff.Execute(context.Background(), job, runner)
+
+			if runErr == nil || len(commands.deleted) != 1 || !strings.HasPrefix(commands.deleted[0], "job/") || commands.authorityReleased {
+				t.Fatalf("cleanup released protections before cessation: deletes=%v authorityReleased=%v err=%v", commands.deleted, commands.authorityReleased, runErr)
+			}
+		})
+	}
+}
+
+func Test_CommandKubernetesJobClient_cleanup_ignores_same_name_pod_not_owned_by_deleted_job_uid(t *testing.T) {
+	connection := testNetworkConnection(t, "source", "source.db.internal", "source-secret", "DATABASE_URL", "16.4")
+	job, err := NewIsolatedJob(testJobSpec(t, connection, StreamStdout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := &cleanupLifecycleCommands{fakeRecoveryCommands: &fakeRecoveryCommands{job: job}, unrelatedPodSameName: true}
+	client, _ := NewCommandKubernetesJobClient(commands, time.Minute)
+	runner, _ := NewKubernetesJobRunner(client)
+	handoff, _ := NewDumpHandoff(context.Background(), &countingWriteCloser{}, 16)
+
+	_, runErr := handoff.Execute(context.Background(), job, runner)
+
+	wantSelector := "job-name=" + recoveryObjectNames(job).job + ",batch.kubernetes.io/controller-uid=job-uid"
+	if runErr != nil || commands.podSelector != wantSelector || len(commands.deleted) != 3 || !commands.authorityReleased {
+		t.Fatalf("selector=%q deletes=%v authorityReleased=%v err=%v", commands.podSelector, commands.deleted, commands.authorityReleased, runErr)
 	}
 }
 

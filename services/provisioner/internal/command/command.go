@@ -261,10 +261,10 @@ func (r *OSRunner) runObjectUIDRequest(ctx context.Context, resource, namespace,
 		return commandLine, err
 	}
 	propagationPolicy := "Foreground"
-	if resource == "secret" {
-		// The provider Secret admission policy reserves connection Secret updates
-		// to the provisioner. Foreground deletion would require the garbage
-		// collector to update its finalizer and would therefore deadlock.
+	if resource == "secret" || resource == "networkpolicy" || resource == "job" {
+		// Admission reserves these immutable objects to the provisioner.
+		// Foreground deletion would require a garbage-collector UPDATE and
+		// deadlock against that policy.
 		propagationPolicy = "Background"
 	}
 	options := deleteOptions{

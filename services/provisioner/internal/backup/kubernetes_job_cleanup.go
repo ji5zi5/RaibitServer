@@ -16,9 +16,11 @@ func (c *CommandKubernetesJobClient) CleanupJob(ctx context.Context, created Cre
 }
 
 func (c *CommandKubernetesJobClient) cleanup(ctx context.Context, created CreatedJobObservation) error {
+	if err := c.stopCreatedJob(ctx, created); err != nil {
+		return err
+	}
 	var result error
 	objects := []struct{ resource, name, uid string }{
-		{"job", created.Name, created.UID},
 		{"networkpolicy", created.policyName, created.policyUID},
 		{"secret", created.snapshotName, created.snapshotUID},
 	}
@@ -42,6 +44,51 @@ func (c *CommandKubernetesJobClient) cleanup(ctx context.Context, created Create
 		result = errors.Join(result, err)
 	}
 	return errors.Join(result, c.releaseProviderPod(ctx, created))
+}
+
+func (c *CommandKubernetesJobClient) stopCreatedJob(ctx context.Context, created CreatedJobObservation) error {
+	if created.Name == "" {
+		return nil
+	}
+	uid := created.UID
+	if uid == "" {
+		var err error
+		uid, err = c.readOwnedObjectUID(ctx, "job", created.Namespace, created.Name, created.labels)
+		if err != nil && !errors.Is(err, command.ErrObjectNotFound) {
+			return err
+		}
+	}
+	if uid == "" {
+		return ErrRecoveryJob
+	}
+	if _, err := c.runner.DeleteObjectUID(ctx, "job", created.Namespace, created.Name, uid, c.timeout); err != nil {
+		return err
+	}
+	if _, err := c.runner.Run(ctx, "kubectl", []string{"wait", "--for=delete", "job/" + created.Name, "--namespace", created.Namespace, "--timeout", c.timeout.String()}, false, c.timeout); err != nil {
+		return err
+	}
+	if _, err := c.readOwnedObjectUID(ctx, "job", created.Namespace, created.Name, created.labels); !errors.Is(err, command.ErrObjectNotFound) {
+		return errors.Join(ErrRecoveryJob, err)
+	}
+	var pods struct {
+		APIVersion string        `json:"apiVersion"`
+		Kind       string        `json:"kind"`
+		Items      []recoveryPod `json:"items"`
+	}
+	selector := "job-name=" + created.Name + ",batch.kubernetes.io/controller-uid=" + uid
+	if err := c.readJSON(ctx, []string{"get", "pods", "--namespace", created.Namespace, "-l", selector, "-o", "json"}, &pods); err != nil || pods.APIVersion != "v1" || pods.Kind != "PodList" || len(pods.Items) != 0 {
+		if err != nil || pods.APIVersion != "v1" || pods.Kind != "PodList" {
+			return errors.Join(ErrRecoveryJob, err)
+		}
+		for _, pod := range pods.Items {
+			for _, owner := range pod.Metadata.OwnerReferences {
+				if owner.Controller != nil && *owner.Controller && owner.APIVersion == "batch/v1" && owner.Kind == "Job" && owner.Name == created.Name && owner.UID == uid {
+					return ErrRecoveryJob
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (c *CommandKubernetesJobClient) readOwnedObjectUID(ctx context.Context, resource, namespace, name string, labels map[string]string) (string, error) {

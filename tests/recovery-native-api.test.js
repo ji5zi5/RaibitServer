@@ -26,11 +26,18 @@ test('native recovery API gate uses an owned bounded cluster and captures cleanu
 });
 
 test('native recovery API gate submits generated policy and requires real TTL deletion', () => {
+  const ttlDependent = script.match(/cat >"\$\{WORK_DIR\}\/dependent-pod\.yaml" <<EOF[\s\S]*?\nEOF/)?.[0] ?? '';
   assert.match(script, /BOUNDARY_FIXTURE/);
   assert.match(script, /jq -e 'type == "object"/);
   assert.match(script, /generated-networkpolicy\.json/);
   assert.match(script, /stored-networkpolicy\.json/);
   assert.match(script, /has\("ingress"\)[\s\S]*omitted/);
+  assert.match(script, /uid_delete networkpolicy/);
+  assert.match(script, /preconditions:\{uid:\$uid\}.*propagationPolicy:"Background"/);
+  assert.match(script, /Impersonate-User: \$\{PROVISIONER_USER\}/);
+  assert.match(script, /wait --for=delete "networkpolicy\/\$\{policy_name\}" --timeout=30s/);
+  assert.match(script, /post-delete-networkpolicy\.stderr[\s\S]*NotFound/);
+  assert.match(script, /NETWORKPOLICY_UID_DELETE_ABSENT=PASS/);
   assert.match(script, /nonempty recovery ingress unexpectedly admitted/);
   assert.match(script, /--subresource=status/);
   assert.match(script, /SuccessCriteriaMet/);
@@ -49,7 +56,7 @@ test('native recovery API gate submits generated policy and requires real TTL de
   assert.doesNotMatch(script, /patch job "\$\{job_name\}"[\s\S]*?\n.*get job "\$\{job_name\}" -o json >"\$\{EVIDENCE_DIR\}\/terminal-job\.json"/);
   assert.match(script, /wait --for=delete "job\/\$\{job_name\}" --timeout=120s/);
   assert.match(script, /ownerReferences:[\s\S]*uid: \$\{job_uid\}/);
-  assert.doesNotMatch(script, /controller: true/);
+  assert.doesNotMatch(ttlDependent, /controller: true/);
   assert.match(script, /pre-ttl-dependent-pod\.json/);
   assert.match(script, /has\("deletionTimestamp"\).*false/);
   assert.match(script, /wait --for=delete pod\/native-ttl-dependent --timeout=120s/);
@@ -57,6 +64,24 @@ test('native recovery API gate submits generated policy and requires real TTL de
   assert.match(script, /post-ttl-pod\.stderr[\s\S]*NotFound/);
   assert.match(script, /dependent_pre_ttl_exists=true/);
   assert.doesNotMatch(script, /--dry-run/);
+});
+
+test('native recovery API gate cancels an active Job and retains protections until its UID-owned Pods stop', () => {
+  assert.match(script, /wait --for=jsonpath='\{\.status\.active\}'=1 "job\/\$\{cancel_job_name\}"/);
+  assert.match(script, /logs -f "job\/\$\{cancel_job_name\}" -c step-0/);
+  assert.match(script, /uid_delete cancel-job .*\/jobs\/\$\{cancel_job_name\}.*\$\{cancel_job_uid\}/);
+  assert.match(script, /batch\.kubernetes\.io\/controller-uid: \$\{cancel_job_uid\}/);
+  assert.match(script, /recovery\.raibitserver\.io\/native-hold[\s\S]*controller: true/);
+  assert.match(script, /cancel-job-post-delete\.stderr/);
+  assert.match(script, /cancel-pod-terminating\.json/);
+  assert.match(script, /cancel-policy-protected\.json/);
+  assert.match(script, /cancel-snapshot-protected-uid\.txt/);
+  assert.match(script, /cancel-provider-protected\.json/);
+  assert.match(script, /cancel-owned-pods-absent\.json/);
+  assert.match(script, /wait --for=delete pod --selector "\$\{cancel_pod_selector\}"[\s\S]*uid_delete cancel-policy[\s\S]*uid_delete cancel-snapshot[\s\S]*provider_release_patch/);
+  assert.match(script, /protections_held_while_pod_terminating=true/);
+  assert.match(script, /pod_absent_before_protection_release=true/);
+  assert.match(script, /RUNNING_JOB_CANCEL_PROTECTION_LIFECYCLE=PASS/);
 });
 
 test('CI runs the focused native recovery gate and uploads its evidence', () => {

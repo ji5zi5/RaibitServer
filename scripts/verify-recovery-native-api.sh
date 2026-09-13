@@ -311,7 +311,7 @@ kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_
   wait --for=delete pod --selector "${cancel_pod_selector}" --timeout=60s
 kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" \
   get pods --selector "${cancel_pod_selector}" -o json >"${EVIDENCE_DIR}/cancel-owned-pods-absent.json"
-jq -e '.apiVersion == "v1" and .kind == "PodList" and (.items | length) == 0' "${EVIDENCE_DIR}/cancel-owned-pods-absent.json" >/dev/null
+jq -e '.apiVersion == "v1" and (.kind == "PodList" or .kind == "List") and (.items | type) == "array" and (.items | length) == 0' "${EVIDENCE_DIR}/cancel-owned-pods-absent.json" >/dev/null
 uid_delete cancel-policy "/apis/networking.k8s.io/v1/namespaces/${TENANT_NAMESPACE}/networkpolicies/${cancel_policy_name}" "${cancel_policy_uid}"
 uid_delete cancel-snapshot "/api/v1/namespaces/${TENANT_NAMESPACE}/secrets/${cancel_snapshot_name}" "${cancel_snapshot_uid}"
 provider_version="$(kubectl --context "${KUBE_CONTEXT}" --request-timeout=30s --namespace "${TENANT_NAMESPACE}" get pod native-provider-0 -o jsonpath='{.metadata.resourceVersion}')"

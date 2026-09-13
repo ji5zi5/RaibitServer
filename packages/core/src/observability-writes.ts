@@ -1,17 +1,23 @@
 import crypto from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { z } from 'zod';
 import { sanitizeObservationLine, type RedactionState } from './observability-redaction.ts';
 
 const unknownState: RedactionState = { v: 1, pem: false, uncertain: true };
 const initialState: RedactionState = { v: 1, pem: false };
 const memoryStates = new WeakMap<object, Map<string, RedactionState>>();
-const stateSchema = z.object({
-  v: z.literal(1),
-  pem: z.boolean(),
-  quote: z.enum(['"', "'", '\\"', "\\'"]).optional(),
-  uncertain: z.literal(true).optional(),
-}).strict();
+
+// Core remains importable without database-only dependencies in CLI/isolated builds.
+function parseObservationState(raw: string): RedactionState {
+  const input: unknown = JSON.parse(raw);
+  if (typeof input !== 'object' || input === null || Array.isArray(input)
+    || !('v' in input) || input.v !== 1 || !('pem' in input) || typeof input.pem !== 'boolean'
+    || Object.keys(input).some(key => !['v', 'pem', 'quote', 'uncertain'].includes(key))) return unknownState;
+  const quote = 'quote' in input ? input.quote : undefined;
+  const uncertain = 'uncertain' in input ? input.uncertain : undefined;
+  if (quote !== undefined && quote !== '"' && quote !== "'" && quote !== '\\"' && quote !== "\\'") return unknownState;
+  if (uncertain !== undefined && uncertain !== true) return unknownState;
+  return { v: 1, pem: input.pem, ...(quote === '"' || quote === "'" || quote === '\\"' || quote === "\\'" ? { quote } : {}), ...(uncertain ? { uncertain: true } as const : {}) };
+}
 
 export function maskMemoryObservationLine(owner: object, identity: readonly (string | null)[], value: string): string {
   const key = JSON.stringify(identity);
@@ -45,8 +51,7 @@ export async function appendPrismaObservationLog(prisma: PrismaClient, input: Ob
       if (!existing) state = initialState;
     } else if (cursor && cursor.length <= 256) {
       try {
-        const parsed = stateSchema.safeParse(JSON.parse(cursor));
-        if (parsed.success) state = parsed.data;
+        state = parseObservationState(cursor);
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
       }

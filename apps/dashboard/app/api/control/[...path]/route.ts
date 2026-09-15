@@ -4,10 +4,10 @@ import { dashboardApiContext } from '../../../../lib/api';
 import { githubConflictRecovery } from '../../../../lib/control-plane-errors.js';
 import { OAUTH_BROWSER_COOKIE_NAME } from '@raibitserver/core/oauth-source';
 import { githubOAuthBrowserBinding, githubOAuthBrowserCookieOptions, githubOAuthRelayHeaders } from '../../../../lib/github-oauth-relay';
+import { clearSessionCookie, setSessionCookie } from '../../../../lib/session-cookies.js';
 import {
   GITHUB_OAUTH_STATE_COOKIE_NAME,
   GITHUB_OAUTH_VERIFIER_COOKIE_NAME,
-  SESSION_COOKIE_NAME,
   boundedPassThrough,
   browserSafePayload,
   dashboardRequestUrl,
@@ -27,7 +27,6 @@ import {
   readBoundedBody,
   responseStatusAllowsBody,
   safeReturnPath,
-  sessionCookieOptions,
   upstreamPath,
   withFlashMessage,
 } from '../../../../lib/request-security.js';
@@ -223,7 +222,7 @@ async function proxyRequest(request: NextRequest, routeContext: RouteContext, me
         : new NextResponse(null, { status: upstream.status });
     applySessionCookie(response, path, payload);
     if (path === '/organizations' && payload?.reauthenticationRequired === true) {
-      response.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), sameSite: 'lax', maxAge: 0 });
+      clearSessionCookie(response);
     }
     if (path === '/auth/password-reset/complete') clearSessionCookie(response);
     response.headers.set('cache-control', 'no-store');
@@ -255,13 +254,8 @@ function formErrorRedirect(requestUrl: string, returnPath: string, code: string)
 
 function applySessionCookie(response: NextResponse, path: string, payload: any) {
   const token = extractSessionToken(payload);
-  const cookieOptions = { ...sessionCookieOptions(), sameSite: 'lax' as const };
-  if (token) response.cookies.set(SESSION_COOKIE_NAME, token, cookieOptions);
+  if (token) setSessionCookie(response, token);
   if (path === '/auth/logout') clearSessionCookie(response);
-}
-
-function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(SESSION_COOKIE_NAME, '', { ...sessionCookieOptions(), sameSite: 'lax', maxAge: 0 });
 }
 
 async function handleGitHubOAuthRequest(request: NextRequest, browserRequestUrl: string, path: string) {

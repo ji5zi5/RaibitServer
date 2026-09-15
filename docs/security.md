@@ -31,6 +31,13 @@ Runtime workload policy는 다음을 차단합니다.
 - PodDisruptionBudget 지원
 - HPA 지원
 
+## Dashboard session cookies
+
+- 로그인 세션은 `__Host-raibitserver_session`에만 저장합니다. 모든 환경에서 `Secure`, `HttpOnly`, `Path=/`, `SameSite=Lax`를 사용하며 `Domain`을 지정하지 않습니다. 세션의 `Secure` 속성은 설정으로 끌 수 없습니다.
+- 구형 `raibitserver_session`은 인증에 사용하거나 새 세션으로 자동 전환하지 않습니다. 방문·로그인·로그아웃 시 구형 host-only 쿠키를 명시적으로 만료시키므로 적용 후 다시 로그인해야 합니다. 다른 도메인/경로에 남은 구형 쿠키도 인증에는 무시됩니다.
+- 동일한 새 세션 이름이 중복되거나 값이 잘못된 요청은 인증하지 않습니다. tenant sibling이 부모 `Domain`으로 새 이름을 주입하는 것은 브라우저의 `__Host-` 규칙으로 차단됩니다.
+- 브라우저 인증 개발 환경도 HTTPS를 사용하세요. HTTP 전용 일반 개발 도메인에서 접두사를 제거하거나 구형 쿠키로 돌아가는 fallback은 없습니다.
+
 ## Secret security
 
 - `.env` upload는 일반 값과 secret-looking key를 분리합니다.

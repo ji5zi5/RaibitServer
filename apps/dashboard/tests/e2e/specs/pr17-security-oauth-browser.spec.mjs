@@ -30,7 +30,7 @@ after(async () => {
   const serialized = JSON.stringify({
     mode: fx.mode, chromium: fx.version, headed: process.env.RAIBIT_PR17_HEADLESS !== '1',
     harness: 'HTTPS actual NextRequest/NextResponse + unchanged GET handler + real Nest HTTP/in-memory store; mock GitHub provider',
-    sourceSeam: 'dashboardApiContext baseURL only', siblingObservation: fx.siblingObservation, outcomes, api: fx.api, bff: fx.bff, faults: fx.faults,
+    sourceSeam: 'actual api.ts; AsyncLocalStorage next/headers injection', siblingObservation: fx.siblingObservation, outcomes, api: fx.api, bff: fx.bff, faults: fx.faults,
   }, null, 2);
   assert.equal([...fx.runtime.secrets].some((secret) => typeof secret === 'string' && secret.length >= 16 && serialized.includes(secret)), false, 'retained report must not contain runtime secrets');
   await fs.writeFile(path.join(fx.evidence, `pr17-security-${fx.mode}-results.json`), serialized);
@@ -66,13 +66,13 @@ test('sibling Domain injection is rejected before callback reaches API or create
   const after = snapshot(fx);
   fx.siblingObservation = { blocked, apiCallbacks: after.apiCallback - before.apiCallback, tokenExchanges: after.token - before.token,
     consumed: after.consumed - before.consumed, landing: new URL(a.page.url()).pathname,
-    sessions: (await a.context.cookies()).filter((cookie) => cookie.name === 'raibitserver_session').length };
+    sessions: (await a.context.cookies()).filter((cookie) => cookie.name === '__Host-raibitserver_session').length };
   // Then: even with a valid browser ID, legacy state/verifier are not accepted by the actual BFF.
   assert.equal(after.apiCallback - before.apiCallback, 0, 'legacy sibling cookies must not reach the Nest callback');
   assert.equal(new URL(a.page.url()).pathname, '/login');
   assert.equal(after.token - before.token, 0);
   assert.equal(after.consumed - before.consumed, 0);
-  assert.equal((await a.context.cookies()).some((cookie) => cookie.name === 'raibitserver_session'), false);
+  assert.equal((await a.context.cookies()).some((cookie) => cookie.name === '__Host-raibitserver_session'), false);
   await assertDeletion(response);
   await assertCleared(a, fx);
   outcomes.push({ case: 'sibling-domain', actualSetCookieHeaders: 6, legacyParentCookiesAccepted: 3, blocked, apiCallbacks: 0, tokenExchanges: 0, sessions: 0, transientDeletion: true });
@@ -138,14 +138,14 @@ test('copied transaction cookies fail browser B binding and legitimate browser A
   assert.equal(rejected.apiCallback - before.apiCallback, 1);
   assert.equal(fx.api.at(-1).status, 400);
   assert.equal(rejected.token - before.token, 0); assert.equal(rejected.consumed - before.consumed, 0);
-  assert.equal((await b.context.cookies()).some((cookie) => cookie.name === 'raibitserver_session'), false);
+  assert.equal((await b.context.cookies()).some((cookie) => cookie.name === '__Host-raibitserver_session'), false);
   await assertDeletion(denied); await assertCleared(b, fx);
   // Then: the rejected attempt leaves A's transaction usable for one real API exchange and session.
   const accepted = await complete(a, fx, tuple);
   assert.equal(new URL(a.page.url()).pathname, '/console');
   const finished = snapshot(fx);
   assert.equal(finished.token - rejected.token, 1); assert.equal(finished.pkce - rejected.pkce, 1); assert.equal(finished.consumed - rejected.consumed, 1);
-  const session = (await a.context.cookies(fx.origin)).find((cookie) => cookie.name === 'raibitserver_session')?.value;
+  const session = (await a.context.cookies(fx.origin)).find((cookie) => cookie.name === '__Host-raibitserver_session')?.value;
   assert.ok(Boolean(session)); fx.runtime.secrets.add(session);
   assert.equal((await fetch(`${fx.runtime.nest.baseUrl}/auth/me`, { headers: { authorization: `Bearer ${session}` }, signal: AbortSignal.timeout(5000) })).status, 200);
   await assertDeletion(accepted); await assertCleared(a, fx);

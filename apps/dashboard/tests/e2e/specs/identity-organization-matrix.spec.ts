@@ -129,7 +129,7 @@ test.describe('@platform-expansion @identity-organization-matrix', () => {
     await userPage.getByRole('menuitem', { name: '로그아웃' }).click();
 
     // Then: the session cookie is gone and the protected account route requires login without exposing claims.
-    await expect.poll(async () => (await userPage.context().cookies()).some((cookie) => cookie.name === 'raibitserver_session')).toBe(false);
+    await expect.poll(async () => (await userPage.context().cookies()).some((cookie) => cookie.name === '__Host-raibitserver_session')).toBe(false);
     await userPage.goto('/account/security');
     await expectRoute(userPage, '/login');
     expect(await userPage.locator('body').innerText()).not.toContain('sessionVersion');

@@ -102,7 +102,7 @@ test('dashboard request hardening uses the supported Next proxy convention', asy
 	]);
 	assert.match(proxy, /export function proxy\(request: NextRequest\)/);
 	for (const marker of ['dashboardSecurityHeaders', 'content-security-policy', 'x-nonce']) assert.match(proxy, new RegExp(marker));
-	assert.match(proxy, /request\.cookies\.get\(SESSION_COOKIE_NAME\)/);
+	assert.match(proxy, /readSessionToken\(request\.headers\.get\('cookie'\)\)/);
 	assert.doesNotMatch(proxy, /RAIBITSERVER_DASHBOARD_TOKEN|hasServerApiToken/);
 	assert.match(layout, /export const dynamic = 'force-dynamic'/, 'nonce CSP requires request-time rendering');
 });

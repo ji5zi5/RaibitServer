@@ -6,7 +6,7 @@ export const FIXTURE_ORIGIN = 'http://127.0.0.1:3411';
 export const VIEWPORT_MATRIX = [{ width: 375, height: 812 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }] as const;
 
 export async function installSession(context: BrowserContext, token: string): Promise<void> {
-  await context.addCookies([{ name: 'raibitserver_session', value: token, domain: 'console.localhost', path: '/', httpOnly: true, sameSite: 'Lax' }]);
+  await context.addCookies([{ name: '__Host-raibitserver_session', value: token, domain: 'console.localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
 }
 
 export async function nativeFormData(page: Page, selector: string): Promise<readonly [string, string][]> {

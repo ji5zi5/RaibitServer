@@ -1,5 +1,6 @@
-import { cookies } from 'next/headers';
-import { fetchWithInitialResponseTimeout, readBoundedBody, SESSION_COOKIE_NAME } from './request-security.js';
+import { headers } from 'next/headers';
+import { fetchWithInitialResponseTimeout, readBoundedBody } from './request-security.js';
+import { readSessionToken } from './session-cookies.js';
 import { controlPlaneErrorCode } from './control-plane-errors.js';
 
 export { apiAction } from './api-action';
@@ -34,7 +35,7 @@ function dashboardApiBaseUrl() {
 
 export async function dashboardApiContext(): Promise<DashboardApiContext> {
   const baseUrl = dashboardApiBaseUrl();
-  const sessionToken = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  const sessionToken = readSessionToken((await headers()).get('cookie'));
   const token = sessionToken;
   return { baseUrl, token, headers: token ? { authorization: `Bearer ${token}` } : {} };
 }

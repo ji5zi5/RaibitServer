@@ -42,13 +42,13 @@ test.describe('@theme semantic integration', () => {
     for (const row of rows) {
       await test.step(row.name, async () => {
         const context = await browser.newContext({ viewport: row.viewport, colorScheme: 'colorScheme' in row ? row.colorScheme : 'light' });
-        if ('authenticated' in row) await context.addCookies([{ name: 'raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', httpOnly: true, sameSite: 'Lax' }]);
+        if ('authenticated' in row) await context.addCookies([{ name: '__Host-raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
         const page = await context.newPage();
         const assertNoErrors = observeThemeErrors(page, 'globalError' in row);
         try {
           await prepareTheme(page, row.origin, row.preference);
           if ('globalError' in row) {
-            const arm = await request.get(globalErrorArm, { headers: { cookie: 'raibitserver_session=fixture-user-populated', host: 'console.localhost:3410' }, maxRedirects: 0 });
+            const arm = await request.get(globalErrorArm, { headers: { cookie: '__Host-raibitserver_session=fixture-user-populated', host: 'console.localhost:3410' }, maxRedirects: 0 });
             const fixtureCookie = arm.headers()['set-cookie']?.match(/T6_E2E_GLOBAL_ERROR=([^;]+)/)?.[1];
             expect(arm.status()).toBe(307);
             expect(fixtureCookie).toBe('1');
@@ -68,7 +68,7 @@ test.describe('@theme semantic integration', () => {
 
   test('proves radio keyboard, direct selection, persistence, and same-document synchronization', async ({ browser }) => {
     const context = await browser.newContext({ viewport: THEME_VIEWPORTS[1] });
-    await context.addCookies([{ name: 'raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', httpOnly: true, sameSite: 'Lax' }]);
+    await context.addCookies([{ name: '__Host-raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
     const page = await context.newPage();
     const assertNoErrors = observeThemeErrors(page);
     try {
@@ -107,7 +107,7 @@ test.describe('@theme semantic integration', () => {
 
   test('synchronizes two tabs and refreshes the receiving host-only cookie', async ({ browser }) => {
     const context = await browser.newContext({ viewport: THEME_VIEWPORTS[2] });
-    await context.addCookies([{ name: 'raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', httpOnly: true, sameSite: 'Lax' }]);
+    await context.addCookies([{ name: '__Host-raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' }]);
     const first = await context.newPage();
     const second = await context.newPage();
     const assertFirstClean = observeThemeErrors(first);

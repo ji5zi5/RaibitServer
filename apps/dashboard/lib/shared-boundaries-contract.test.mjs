@@ -138,7 +138,7 @@ test('E2E-only fixture routes are inert without the explicit local environment a
   assert.match(browserSpec, /RAIBITSERVER_E2E_FIXTURES=1/);
   assert.match(browserSpec, /\{\s*userPage\s*\}/);
   assert.match(dashboardFixtures, /installSession\(context, 'fixture-user-populated'\)/);
-  assert.match(browserContracts, /name: 'raibitserver_session'/);
+  assert.match(browserContracts, /name: '__Host-raibitserver_session'/);
   assert.match(browserContracts, /domain: 'console\.localhost'/);
   assert.match(browserContracts, /export const DASHBOARD_ORIGIN = 'http:\/\/console\.localhost:3410'/);
   assert.match(browserSpec, /t6-errors-404/);

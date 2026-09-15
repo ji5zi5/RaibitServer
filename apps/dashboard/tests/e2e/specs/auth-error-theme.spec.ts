@@ -27,7 +27,7 @@ async function selectTheme(page: import('@playwright/test').Page, preference: 'l
 
 async function openGlobalErrorFixture(page: import('@playwright/test').Page, request: import('@playwright/test').APIRequestContext): Promise<void> {
   const arm = await request.get(`${fixtureOrigin}/errors/fixtures/global-error/arm`, {
-    headers: { cookie: 'raibitserver_session=fixture-user-populated', host: 'console.localhost:3410' },
+    headers: { cookie: '__Host-raibitserver_session=fixture-user-populated', host: 'console.localhost:3410' },
     maxRedirects: 0,
   });
   expect(arm.status()).toBe(307);
@@ -35,10 +35,10 @@ async function openGlobalErrorFixture(page: import('@playwright/test').Page, req
   const fixtureCookie = arm.headers()['set-cookie']?.match(/T6_E2E_GLOBAL_ERROR=([^;]+)/)?.[1];
   expect(fixtureCookie).toBe('1');
   await page.context().addCookies([
-    { name: 'raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', httpOnly: true, sameSite: 'Lax' },
+    { name: '__Host-raibitserver_session', value: 'fixture-user-populated', domain: 'console.localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' },
     { name: 'T6_E2E_GLOBAL_ERROR', value: fixtureCookie, domain: 'console.localhost', path: '/errors/fixtures/global-error', httpOnly: true, sameSite: 'Strict' },
   ]);
-  expect((await page.context().cookies('http://console.localhost:3410/errors/fixtures/global-error')).map((cookie) => cookie.name)).toEqual(expect.arrayContaining(['raibitserver_session', 'T6_E2E_GLOBAL_ERROR']));
+  expect((await page.context().cookies('http://console.localhost:3410/errors/fixtures/global-error')).map((cookie) => cookie.name)).toEqual(expect.arrayContaining(['__Host-raibitserver_session', 'T6_E2E_GLOBAL_ERROR']));
   await page.goto('/errors/fixtures/global-error', { waitUntil: 'commit', timeout: 5_000 });
 }
 

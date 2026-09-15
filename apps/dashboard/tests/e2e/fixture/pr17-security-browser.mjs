@@ -14,7 +14,7 @@ export const loginPath = '/api/control/auth/github/login';
 export const callbackPath = '/api/control/auth/github/callback';
 export const browserName = '__Host-raibitserver_github_oauth_browser';
 export const transientNames = ['__Host-raibitserver_github_oauth_state', '__Host-raibitserver_github_oauth_verifier'];
-export const evidence = fileURLToPath(new URL('../../../../../.omo/evidence/pr17-security-20260912/browser/', import.meta.url));
+export const evidence = process.env.RAIBIT_PR17_EVIDENCE || fileURLToPath(new URL('../../../../../.omo/evidence/pr17-security-20260912/browser/', import.meta.url));
 
 export async function bootSecurityBrowser() {
   const previousEnv = { ...process.env };
@@ -52,7 +52,7 @@ export async function bootSecurityBrowser() {
     if (failures.length) throw new Error(failures.join(','));
   })();
   try {
-    fx.mode = process.env.RAIBIT_PR17_LEGACY_MUTATION === '1' ? 'legacy-mutation' : 'fixed';
+    fx.mode = process.env.RAIBIT_PR17_SESSION_MUTATION === '1' ? 'session-mutation' : process.env.RAIBIT_PR17_LEGACY_MUTATION === '1' ? 'legacy-mutation' : 'fixed';
     const openssl = spawn(process.env.RAIBIT_PR17_OPENSSL || (process.platform === 'win32' ? 'C:/Program Files/Git/usr/bin/openssl.exe' : 'openssl'), [
       'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(privateDirectory, 'key.pem'),
       '-out', path.join(privateDirectory, 'cert.pem'), '-days', '1', '-subj', '/CN=console.raibit.test',
@@ -74,12 +74,12 @@ export async function bootSecurityBrowser() {
     runtime.secrets.add(process.env.RAIBITSERVER_OAUTH_RELAY_SECRET);
     fx.runtime = runtime;
     fx.ownedPorts.push(...runtime.ownedPorts);
-    process.env.RAIBIT_PR17_API_URL = runtime.nest.baseUrl;
+    process.env.RAIBITSERVER_API_URL = runtime.nest.baseUrl;
     runtime.nest.app.getHttpServer().on('request', (req, res) => {
       const operation = new URL(req.url, 'http://localhost').pathname;
       res.once('finish', () => fx.api.push({ operation, status: res.statusCode, peer: req.socket.remoteAddress }));
     });
-    route = await loadSecurityRoute({ legacyMutation: fx.mode === 'legacy-mutation' });
+    route = await loadSecurityRoute({ legacyMutation: fx.mode === 'legacy-mutation', sessionMutation: fx.mode === 'session-mutation' });
     browserServer = await chromium.launchServer({
       executablePath: process.env.RAIBIT_OAUTH_CHROMIUM || chromium.executablePath(),
       headless: process.env.RAIBIT_PR17_HEADLESS === '1',
@@ -98,11 +98,16 @@ export async function bootSecurityBrowser() {
       res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store', 'set-cookie': fx.injection });
       return res.end('<title>PR17 cookie response</title><h1>Cookie response delivered</h1>');
     }
-    if (url.hostname === 'console.raibit.test' && [loginPath, callbackPath].includes(url.pathname)) {
+    if (url.hostname === 'console.raibit.test' && url.pathname.startsWith('/api/control/')) {
       const headers = new Headers();
       for (let i = 0; i < req.rawHeaders.length; i += 2) headers.append(req.rawHeaders[i], req.rawHeaders[i + 1]);
-      const request = new route.NextRequest(url, { method: req.method, headers });
-      const result = await route.GET(request, { params: Promise.resolve({ path: url.pathname.slice('/api/control/'.length).split('/') }) });
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = Buffer.concat(chunks);
+      const request = new route.NextRequest(url, { method: req.method, headers, ...(body.length ? { body } : {}) });
+      const result = await route.withHeaders(headers, () => route[req.method](request, {
+        params: Promise.resolve({ path: url.pathname.slice('/api/control/'.length).split('/') }),
+      }));
       fx.bff.push({ operation: url.pathname, cookieNames: (req.headers.cookie || '').split(';').filter(Boolean).map((entry) => entry.split('=', 1)[0].trim()), status: result.status });
       const responseHeaders = Object.fromEntries(result.headers);
       delete responseHeaders['set-cookie'];

@@ -44,6 +44,27 @@ jobs:
       - run: node src/cli.js k8s-apply examples/project.json >/tmp/raibitserver-k8s-apply.json
       - run: pnpm e2e:dry
 
+  session-cookie-browser:
+    name: Session cookies / HTTPS browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: apps/dashboard
+      - name: Reject sibling-domain session injection over HTTPS
+        run: node --test apps/dashboard/tests/e2e/specs/pr17-session-cookie-browser.spec.mjs
+        env:
+          RAIBIT_PR17_HEADLESS: '1'
+
   postgres-integration:
     name: PostgreSQL / Prisma integration
     runs-on: ubuntu-latest

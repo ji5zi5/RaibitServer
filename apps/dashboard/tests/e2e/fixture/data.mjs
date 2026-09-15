@@ -2,7 +2,7 @@ import { can } from '../../../../../packages/core/src/rbac.ts';
 import { resourceAvailability } from '../../../../../packages/core/src/resource-execution.ts';
 
 export const FIXED_TIME = '2026-08-31T03:00:00.000Z';
-export const SESSION_COOKIE = 'raibitserver_session';
+export const SESSION_COOKIE = '__Host-raibitserver_session';
 export const PUBLIC_SITE_SCENARIOS = Object.freeze(['populated', 'empty', 'partial', 'long']);
 export const DEFAULT_PUBLIC_SITE_SCENARIO = 'populated';
 

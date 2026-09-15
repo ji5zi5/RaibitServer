@@ -107,7 +107,8 @@ test('OAuth BFF accepts a legitimate callback but rejects copied and legacy tran
   assert.equal(new URL((await GET(request(callback, copied), routeContext('callback'))).headers.get('location')).pathname, '/login');
   const complete = await GET(request(callback, cookies), routeContext('callback'));
   assert.equal(new URL(complete.headers.get('location')).pathname, '/console');
-  assert.ok(complete.cookies.get('raibitserver_session')?.value);
+  assert.ok(complete.cookies.get('__Host-raibitserver_session')?.value);
+  assert.equal(complete.cookies.get('raibitserver_session')?.maxAge, 0);
   for (const name of [stateCookie, verifierCookie]) assert.equal(complete.cookies.get(name)?.maxAge, 0);
   assert.notEqual(complete.cookies.get(browserCookie)?.maxAge, 0);
 });

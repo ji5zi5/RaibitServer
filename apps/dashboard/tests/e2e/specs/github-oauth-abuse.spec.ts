@@ -42,7 +42,7 @@ test('OAuth BFF denial consumes once without exchange and clears bound cookies',
   expect(new URL(response.headers()['location'] || '').pathname).toBe('/login');
   const after = await (await request.get(`${manifest.managementOrigin}/__oauth/counters`)).json();
   expect(after.apiCallback - before.apiCallback).toBe(1); expect(after.consumed - before.consumed).toBe(1); expect(after.token - before.token).toBe(0);
-  expect((await context.cookies()).some((cookie) => [...cookieNames, 'raibitserver_session'].includes(cookie.name))).toBe(false);
+  expect((await context.cookies()).some((cookie) => [...cookieNames, '__Host-raibitserver_session'].includes(cookie.name))).toBe(false);
   await navigate(page, `${manifest.origin}/login`);
   await page.screenshot({ path: path.join(evidence, 'oauth-denial-login.png') });
   outcomes.push({ scenario: 'bound-denial', apiCallbacks: 1, consumed: 1, exchanges: 0, cookiesCleared: true });
@@ -64,7 +64,7 @@ test('OAuth BFF callback remains available when direct peer callback budget is e
   expect(response.status()).toBe(302);
   expect(response.headers()['retry-after']).toBeUndefined();
   expect(new URL(response.headers()['location'] || '').searchParams.get('error')).toBe('github_oauth_denied');
-  expect((await context.cookies()).some((cookie) => [...cookieNames, 'raibitserver_session'].includes(cookie.name))).toBe(false);
+  expect((await context.cookies()).some((cookie) => [...cookieNames, '__Host-raibitserver_session'].includes(cookie.name))).toBe(false);
   const after = await (await request.get(`${manifest.managementOrigin}/__oauth/counters`)).json();
   expect(after.token - before.token).toBe(0); expect(after.consumed - before.consumed).toBe(1);
   outcomes.push({ scenario: 'callback-peer-isolation', exchanges: 0, consumed: 1, cookiesCleared: true });

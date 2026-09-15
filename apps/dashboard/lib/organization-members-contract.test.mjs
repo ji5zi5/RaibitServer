@@ -102,5 +102,5 @@ test('approved console users can open the organization creation surface without 
   assert.doesNotMatch(pageSource, /^['"]use client['"]/);
   assert.match(pageSource, /<ConsoleShell active="projects"/);
   assert.match(controlRoute, /path === '\/organizations' && payload\?\.reauthenticationRequired === true/);
-  assert.match(controlRoute, /response\.cookies\.set\(SESSION_COOKIE_NAME, '', \{ \.\.\.sessionCookieOptions\(\), sameSite: 'lax', maxAge: 0 \}\)/);
+  assert.match(controlRoute, /clearSessionCookie\(response\)/);
 });

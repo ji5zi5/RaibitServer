@@ -1,4 +1,4 @@
-export const SESSION_COOKIE_NAME = 'raibitserver_session';
+export { SESSION_COOKIE_NAME, sessionCookieOptions } from './session-cookies.js';
 export const GITHUB_INSTALL_STATE_COOKIE_NAME = 'raibitserver_github_install_state';
 export const GITHUB_OAUTH_STATE_COOKIE_NAME = '__Host-raibitserver_github_oauth_state';
 export const GITHUB_OAUTH_VERIFIER_COOKIE_NAME = '__Host-raibitserver_github_oauth_verifier';
@@ -13,26 +13,15 @@ const BROWSER_SECRET_KEYS = new Set([
 ]);
 const MAX_SESSION_TOKEN_BYTES = 4096;
 
-export function sessionCookieOptions(env = process.env) {
+export function githubInstallStateCookieOptions(env = process.env) {
   const configuredSecure = env.RAIBITSERVER_SESSION_COOKIE_SECURE;
   const normalizedSecure = configuredSecure?.toLowerCase();
   const secure = env.NODE_ENV === 'production'
     ? true
     : normalizedSecure === 'true';
-  const configuredMaxAge = Number.parseInt(env.RAIBITSERVER_SESSION_MAX_AGE_SECONDS || '', 10);
-  const maxAge = Number.isFinite(configuredMaxAge)
-    ? Math.min(Math.max(configuredMaxAge, 300), 604_800)
-    : 28_800;
-  // User workloads are sibling hosts under the same base domain. A Domain
-  // attribute would send this bearer-token cookie to tenant-controlled apps.
-  return { httpOnly: true, sameSite: 'lax', secure, path: '/', maxAge };
-}
-
-export function githubInstallStateCookieOptions(env = process.env) {
-  const { httpOnly, sameSite, secure } = sessionCookieOptions(env);
   return {
-    httpOnly,
-    sameSite,
+    httpOnly: true,
+    sameSite: 'lax',
     secure,
     path: '/github/callback',
     maxAge: 7 * 24 * 60 * 60,

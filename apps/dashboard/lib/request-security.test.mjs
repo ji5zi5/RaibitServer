@@ -49,12 +49,12 @@ test('Given an invalidated account session, when the upstream guard returns an a
 	assert.equal(publicUpstreamErrorCode({ message: 'foreign id 123' }, 401), 'request_failed_401');
 });
 
-test('session cookie is host-only, HttpOnly and only Secure when configured or in production', () => {
-  assert.equal(SESSION_COOKIE_NAME, 'raibitserver_session');
+test('session cookie is host-prefixed and always Secure, including development', () => {
+  assert.equal(SESSION_COOKIE_NAME, '__Host-raibitserver_session');
   assert.deepEqual(sessionCookieOptions({ NODE_ENV: 'development' }), {
     httpOnly: true,
     sameSite: 'lax',
-    secure: false,
+    secure: true,
     path: '/',
     maxAge: 28_800,
   });

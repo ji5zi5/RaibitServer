@@ -22,8 +22,8 @@ test('authenticated console shell remains server-first and preserves tenant-safe
   assert.match(shell, /redirect\('\/login\?error=session_expired'\)/);
   assert.match(shell, /String\(user\?\.role \|\| subject\?\.userRole \|\| ''\)\.toUpperCase\(\) === 'ADMIN'/);
   assert.match(shell, /const requestedOrganizationId = typeof orgRouteValue === 'string' \? orgRouteValue\.trim\(\) : '';/);
-  assert.match(shell, /organizationMemberships\.find\(\(membership\) => membership\.organizationId === requestedOrganizationId\)\?\.organizationId/);
-  assert.match(shell, /memberships: me\.body\?\.memberships/);
+  assert.match(shell, /selectedWorkspace\(\{ requested: requestedOrganizationId, subject, memberships: organizationMemberships \}\)/);
+  assert.match(shell, /organizationMemberships\.find\(\(membership\) => membership\.organizationId === resolvedOrgRouteValue\)/);
   assert.match(shell, /<Suspense fallback=\{null\}><FlashBanner \/><\/Suspense>/);
   assert.match(shell, /const logoutAction = apiAction\('\/auth\/logout'\);/);
   assert.match(shell, /<AccountMenu[\s\S]*?logoutAction=\{logoutAction\}/);

@@ -1,0 +1,89 @@
+name: Prepare domain review
+
+on:
+  push:
+    branches: [feat/domain-rentals-20260929]
+    paths: [.github/workflows/apply-domain-review.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: github.repository == 'jsk1004ha/RaibitServer' && github.ref == 'refs/heads/feat/domain-rentals-20260929'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify and apply the exact reviewed patch
+        run: |
+          set -euo pipefail
+          cat .github/domain-review.patch.1.b64 .github/domain-review.patch.2.b64 | base64 --decode | gzip --decompress > "$RUNNER_TEMP/domain-review.patch"
+          echo "50f3bec6786df4da418c00c4184530f0d14656b063a2c96e9cf71725e3c8c62c  $RUNNER_TEMP/domain-review.patch" | sha256sum --check
+          git apply --check --index "$RUNNER_TEMP/domain-review.patch"
+          git apply --index "$RUNNER_TEMP/domain-review.patch"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate the deterministic API contract and remove staging helpers
+        run: |
+          node scripts/generate-openapi.mjs
+          node scripts/generate-openapi.mjs --check
+          git add openapi/raibitserver.yaml
+          git rm .github/domain-review.patch.1.b64 .github/domain-review.patch.2.b64 .github/workflows/apply-domain-review.yml
+          git diff --cached --check
+      - name: Prepare an unreferenced commit for explicit connector publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const repo = 'jsk1004ha/RaibitServer';
+          if (process.env.GITHUB_REPOSITORY !== repo || process.env.GITHUB_REF !== 'refs/heads/feat/domain-rentals-20260929') throw new Error('branch scope mismatch');
+          const api = async (endpoint, body) => {
+            const response = await fetch(`https://api.github.com/repos/${repo}/git/${endpoint}`, {
+              method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'x-github-api-version': '2022-11-28' },
+              ...(body ? { body: JSON.stringify(body) } : {}),
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(`${endpoint}: ${response.status} ${result.message}`);
+            return result;
+          };
+          const parent = await api(`commits/${process.env.GITHUB_SHA}`);
+          const changes = execFileSync('git', ['diff', '--cached', '--name-status', '--no-renames'], { encoding: 'utf8' }).trim().split('\n');
+          const tree = [];
+          for (const change of changes) {
+            const [status, path] = change.split('\t');
+            if (!/^[AMD]$/.test(status) || !path || path.startsWith('/') || path.includes('..')) throw new Error('unexpected patch path');
+            if (status === 'D') tree.push({ path, mode: '100644', type: 'blob', sha: null });
+            else {
+              const blob = await api('blobs', { content: fs.readFileSync(path).toString('base64'), encoding: 'base64' });
+              tree.push({ path, mode: '100644', type: 'blob', sha: blob.sha });
+            }
+          }
+          const nextTree = await api('trees', { base_tree: parent.tree.sha, tree });
+          const commit = await api('commits', {
+            message: 'fix(domains): address review, contract parity and account rental UI\n\nShare memory namespace locking, register the reviewed migration, regenerate\nOpenAPI, and add real JWT/Nest and HTTPS browser regression coverage.',
+            tree: nextTree.sha, parents: [process.env.GITHUB_SHA],
+          });
+          // Deliberately do not update any branch or tag. The connector publishes
+          // this exact candidate after inspecting the preparation result.
+          fs.mkdirSync(`${process.env.RUNNER_TEMP}/domain-review-candidate`, { recursive: true });
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/domain-review-candidate/candidate.json`, JSON.stringify({ parent: parent.sha, commit: commit.sha, tree: nextTree.sha, paths: tree.map((entry) => entry.path) }, null, 2));
+          console.log(`Prepared candidate ${commit.sha}; no refs updated.`);
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: domain-review-candidate
+          path: ${{ runner.temp }}/domain-review-candidate
+          retention-days: 2

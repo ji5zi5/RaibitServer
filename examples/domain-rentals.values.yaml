@@ -1,11 +1,13 @@
-# Overlay onto your EXISTING production values; do not replace those values.
-# DNS *.raibit.kr must reach the same Traefik gateway with Host preserved.
+# OPTIONAL overrides; existing production Traefik auto-updates need no overlay.
+# Reuse the existing wildcard DNS/Tunnel with its actual Host preserved.
 domainRentals:
-  enabled: true
-  baseDomain: raibit.kr
-  # Empty reuses ingress.tls.existingSecret; it must cover *.raibit.kr.
-  # When Cloudflare terminates HTTPS, configure its wildcard public hostname too.
+  # auto enables existing production Traefik installs; false explicitly opts out.
+  # Use true only when explicitly configuring another ingress/base domain.
+  enabled: auto
+  # Empty reuses hostedErrors.fallbackIngress.host / ingress.hosts.public.
+  baseDomain: ""
+  # Empty reuses the wildcard fallback Secret, then ingress.tls.existingSecret.
   tlsSecret: ""
-  # Comma-separated additional names already used outside this Helm release.
-  # Core reserves api/app/admin/console/resources and apps--/preview--/... itself.
+  # Additional names used outside this Helm release; platform names are reserved.
   reservedNames: ""
+  annotations: {}

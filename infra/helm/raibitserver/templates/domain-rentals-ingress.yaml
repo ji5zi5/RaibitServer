@@ -1,7 +1,5 @@
-{{- $rentals := .Values.domainRentals | default dict }}
-{{- if and .Values.ingress.enabled ($rentals.enabled | default false) }}
-{{- $base := $rentals.baseDomain | default "raibit.kr" }}
-{{- $secret := $rentals.tlsSecret | default .Values.ingress.tls.existingSecret }}
+{{- $rentals := include "raibitserver.domainRentals.config" . | fromJson }}
+{{- if $rentals.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -9,19 +7,19 @@ metadata:
   labels:
     {{- include "raibitserver.commonLabels" . | nindent 4 }}
   annotations:
-    # Above hosted-errors fallback (1), below explicit platform/workload routes.
-    traefik.ingress.kubernetes.io/router.priority: "2"
+    # Inherit existing entrypoints/TLS settings, but not fallback priority 1.
+    {{- toYaml $rentals.annotations | nindent 4 }}
 spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . | quote }}
   {{- end }}
-  {{- if $secret }}
+  {{- if $rentals.tlsSecret }}
   tls:
-    - hosts: [{{ printf "*.%s" $base | quote }}]
-      secretName: {{ $secret | quote }}
+    - hosts: [{{ printf "*.%s" $rentals.baseDomain | quote }}]
+      secretName: {{ $rentals.tlsSecret | quote }}
   {{- end }}
   rules:
-    - host: {{ printf "*.%s" $base | quote }}
+    - host: {{ printf "*.%s" $rentals.baseDomain | quote }}
       http:
         paths:
           - path: /

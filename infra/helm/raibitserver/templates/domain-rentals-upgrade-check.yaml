@@ -1,0 +1,71 @@
+{{- $rentals := include "raibitserver.domainRentals.config" . | fromJson }}
+{{- if $rentals.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-rental-check" (include "raibitserver.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "raibitserver.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/component: domain-rental-upgrade-check
+  annotations:
+    # Runs in the OLD updater's existing helm upgrade call, on the first update.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 120
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        # Do not match the API Service selector: this Pod does not serve HTTP.
+        app.kubernetes.io/name: raibitserver-domain-rental-check
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: domain-rental-upgrade-check
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: check
+          image: "{{ .Values.image.registry }}/raibitserver/api{{ if .Values.image.digests.api }}@{{ .Values.image.digests.api }}{{ else }}:{{ .Values.image.tag }}{{ end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node"]
+          args:
+            - "-e"
+            - |
+              {{- .Files.Get "files/domain-rentals-upgrade-check.cjs" | nindent 14 }}
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: RAIBITSERVER_RENTAL_RUN_UPGRADE_CHECK, value: "1" }
+            - name: RAIBITSERVER_RENTAL_CHECK_API_URL
+              value: {{ printf "http://%s-api:%v" (include "raibitserver.fullname" .) .Values.api.port | quote }}
+            - name: RAIBITSERVER_RENTAL_CHECK_API_HOST
+              value: {{ .Values.ingress.hosts.api | quote }}
+            - name: RAIBITSERVER_DOMAIN_RENTAL_BASE_DOMAIN
+              value: {{ $rentals.baseDomain | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | quote }}
+                  key: {{ .Values.database.urlKey | quote }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 128Mi }
+{{- end }}

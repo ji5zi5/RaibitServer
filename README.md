@@ -251,7 +251,9 @@ Tenant NetworkPolicy는 임의의 사용자 라벨이 아니라 Kubernetes 예�
 
 화면에서 생성·이름/목적지 수정·복사·일시 중지/재개·삭제를 지원합니다. 방문자는 저장한 목적지로 **302 이동**하며 주소창도 바뀝니다. 목적지 자체의 경로·쿼리·fragment는 유지하되, 방문 요청의 경로·쿼리·쿠키·인증 정보는 전달하지 않습니다. 비활성·미등록·계정 정지·한도 초과 주소는 연결되지 않습니다. 서버가 목적지 내용을 가져오는 프록시 기능이나 임의 DNS 레코드 편집 기능은 아닙니다.
 
-운영에서는 PostgreSQL 마이그레이션과 API·대시보드 이미지 배포가 필요합니다. 기존 설정에 [`examples/domain-rentals.values.yaml`](examples/domain-rentals.values.yaml)을 병합하여 `domainRentals.enabled: true`와 wildcard TLS Secret을 설정하고, `*.raibit.kr`의 DNS/Cloudflare Tunnel을 Ingress Controller로 연결합니다. exact host 및 `apps--`·`preview--`·`console--`·`resources--` 서비스 라우트를 먼저 처리해야 합니다. **부모 도메인 세션 쿠키는 사용하지 않으며**, 예약 이름과 운영용 host를 제외해야 합니다. 자세한 라우팅·인증·테스트 절차는 [도메인 대여 운영 가이드](docs/domain-rentals.md)를 따릅니다. 기본적으로 wildcard 공개 라우팅은 비활성입니다.
+기존 **production Traefik + 자동 업데이트** 설치에서는 이 변경을 포함한 `main`의 CI가 통과한 뒤 정상 업데이트만으로 기능이 들어옵니다. `production-values.yaml` 수정, timer 재설치, 별도 마이그레이션 명령이 필요하지 않습니다. 새 chart는 `domainRentals.enabled: auto`를 기본으로 기존 wildcard 도메인·TLS Secret·gateway 설정을 재사용합니다. 기존 `pre-upgrade` Job이 DB를 먼저 변경하고, 새 API·대시보드 배포 뒤 읽기 전용 `post-upgrade` Job이 테이블·충돌 방지 트리거·인증 경계·Host 리다이렉트 처리를 확인합니다. 이 점검이 실패하면 업데이트는 실패하며 기존 Helm rollback 보호가 적용됩니다. DB에 추가된 테이블·대여 데이터는 rollback 때 삭제하지 않습니다.
+
+명시적인 `domainRentals.enabled: false`는 유지하며 로컬/비-Traefik 기본 설치에는 wildcard 경로를 자동 생성하지 않습니다. 이미 동작하는 `*.raibit.kr` DNS/Cloudflare Tunnel과 Host 헤더를 그대로 사용하므로 별도 DNS 권한이나 새 토큰을 요구하지 않습니다. 아직 wildcard가 없는 설치나 별도 base domain은 자동 생성 대상이 아닙니다. exact host 및 기존 서비스 경로 우선순위와 **host-only 세션 쿠키**를 유지합니다. 선택적 운영 설정은 [`examples/domain-rentals.values.yaml`](examples/domain-rentals.values.yaml), 상세한 동작과 검증 범위는 [도메인 대여 운영 가이드](docs/domain-rentals.md)에 있습니다.
 
 ### 4. production 환경 변수 예시
 

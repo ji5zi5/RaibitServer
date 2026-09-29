@@ -117,6 +117,10 @@ jobs:
       - run: pnpm prisma:generate
       - run: pnpm exec prisma migrate deploy --schema prisma/schema.prisma
       - run: node --import ./tests/fixtures/resource-runtime.mjs --test tests/postgres-integration.test.js
+      - name: Domain rental first-update PostgreSQL regression
+        run: node --import ./tests/fixtures/resource-runtime.mjs --test tests/postgres-domain-rentals-upgrade.test.js
+        env:
+          RAIBITSERVER_REQUIRE_DOMAIN_RENTAL_UPGRADE_TEST: '1'
       - name: Deployment retry and recovery PostgreSQL boundaries
         run: |
           admin_url="$DATABASE_URL"

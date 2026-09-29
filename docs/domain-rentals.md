@@ -30,13 +30,26 @@
 
 기존 `DATABASE_URL`을 이용하는 별도 Prisma 연결 풀을 사용한다. 운영 DB의 연결 예산에 이 풀을 포함한다. 개발 memory 모드에서는 기존 제어 영역의 사용자 정보를 조회하며 프로세스 재시작 시 대여 정보가 사라진다. 운영 기본값은 기존과 동일하게 Prisma다.
 
-## 배포 순서
+## 기존 서버의 자동 업데이트
 
-1. 기존 DB 백업 후 정상 배포 절차로 새 Prisma Client를 생성하고 `202609291300_domain_rentals` 마이그레이션을 **API 교체 전에** 적용한다. `prisma db push`가 아니라 기존 `prisma migrate deploy` 경로를 사용해야 hostname 보호 트리거도 설치된다.
-2. API 및 대시보드 이미지를 빌드/배포한다. 관리 기능은 준비되지만 DNS/ingress 설정 없이는 임대 호스트에 접속할 수 없다.
-3. 기존 운영 Helm values에 `examples/domain-rentals.values.yaml`을 **추가 overlay**로 적용한다. 기본 chart에 `domainRentals.enabled`가 없거나 false이면 새로운 wildcard ingress를 만들지 않는다. overlay의 `baseDomain`은 API 환경변수에도 같은 값으로 전달된다. 원래 values의 이미지/시크릿/네트워크 설정을 유지한다.
-4. `*.raibit.kr` DNS를 기존 Traefik 게이트웨이로 연결하고 wildcard TLS 인증서를 준비한다. `domainRentals.tlsSecret`이 비어 있으면 `ingress.tls.existingSecret`을 재사용하며 인증서가 `*.raibit.kr`을 포함해야 한다. Cloudflare Tunnel 사용 시 wildcard public hostname을 같은 Traefik 원본으로 연결하고 원본 **Host 헤더를 유지**한다. 터널 설정이 `api.raibit.kr`로 Host를 덮으면 동작하지 않는다.
-5. 기본 Traefik 우선순위는 기존 hosted-errors fallback(1) < 도메인 대여(2) < 실제 서비스/플랫폼의 명시적 호스트 라우트다. 다른 Ingress 컨트롤러나 우선순위를 커스텀한 환경은 동일한 순서를 별도 확인한다. 외부에서 이미 사용하는 추가 이름은 `domainRentals.reservedNames`에 쉼표로 등록한다.
+이미 production Traefik과 wildcard DNS/Tunnel을 사용하는 서버는 **기존 자동 업데이트만으로 적용**된다. `production-values.yaml` 수정, timer 재설치, 수동 Prisma 명령, Cloudflare 토큰 추가가 필요하지 않다. 변경이 병합된 `main`의 정확한 SHA에 대한 CI가 성공하면 기존 updater가 새 chart로 배포한다. PR 상태만으로는 운영 서버가 갱신되지 않는다.
+
+첫 업데이트는 아직 이전 libexec updater로 실행된다. 따라서 자동 활성화와 검증은 새로운 updater 실행을 요구하지 않고 **새 Helm chart 안에서** 처리한다.
+
+1. 기존 updater가 CI 성공 확인, 이미지 빌드·검사·서명과 digest 고정을 수행한다.
+2. 기존 `pre-install,pre-upgrade` migration Job이 API 이미지에 포함된 `prisma migrate deploy`를 실행한다. `202609291300_domain_rentals`의 테이블과 hostname 보호 트리거가 API 교체 전에 설치된다. 적용된 migration은 재실행 시 건너뛴다.
+3. `domainRentals.enabled: auto`는 production + ingress + Traefik일 때 대여 경로를 자동 생성한다. 기존 설정 파일에 `domainRentals` 항목이 없어도 적용된다. 명시적 `false`는 덮어쓰지 않는다. 로컬/비-Traefik 설치에는 기본적으로 새 wildcard를 만들지 않는다.
+4. base domain은 기존 hosted-errors wildcard(미지정 시 `ingress.hosts.public`)에서 가져온다. TLS Secret은 명시적 대여용 Secret → 기존 wildcard용 Secret → 공용 ingress Secret 순으로 재사용한다. 기존 entrypoints·TLS 관련 annotations도 유지한다. 우선순위는 hosted-errors fallback(1) < 대여(2) < 기존 명시적 호스트 경로다. API와 ingress는 같은 base domain을 사용하며 플랫폼 호스트도 예약한다.
+5. 새 이미지 배포 뒤 `post-install,post-upgrade` Job이 migration 완료, 테이블·두 충돌 방지 트리거, 생성된 Prisma Client, API health, 관리 API의 비인증 접근 차단, 임의 대여 Host의 DB 조회/404/no-store를 검사한다. 계정·대여 데이터를 만들거나 수정하지 않으며 외부 목적지를 가져오지 않는다.
+6. 점검 Job 실패는 Helm upgrade 실패로 전파된다. 기존 Helm 3 `--atomic` / Helm 4 `--rollback-on-failure` 보호와 성공 SHA 기록 순서를 유지한다. 앱/라우팅 rollback과 DB rollback은 다르며 추가된 DB 스키마·데이터를 파괴적으로 되돌리지 않는다.
+
+실패한 점검 Job은 최대 하루 보존되며 코드형 오류만 기록한다. DB URL, JWT, 목적지의 쿼리 토큰은 출력하지 않는다. 점검 Pod는 Kubernetes API 토큰을 받지 않으며 root/privileged/hostPath를 사용하지 않는다. 재시도와 실행 시간에 상한이 있다.
+
+### 기존 edge 설정의 범위
+
+이미 앱 배포에 사용하는 `*.raibit.kr` DNS/Tunnel을 그대로 사용한다. Cloudflare wildcard 규칙은 실제 Host를 보존해야 하고 기존 wildcard 인증서가 해당 도메인을 포함해야 한다. 이 코드는 Cloudflare 계정·DNS 레코드·Tunnel 설정을 새로 만들거나 변경하지 않는다. wildcard가 아직 없는 설치나 별도 base domain까지 자동 연결됐다고 보장하지 않는다. 배포 후 점검은 **클러스터 내부 API·DB**를 확인하며 외부 DNS/TLS의 실접속 증명은 아니다.
+
+일반적인 기존 설치에서는 추가 overlay가 필요하지 않다. 운영자가 기능을 끄거나 별도 domain을 명시적으로 설정할 때만 `examples/domain-rentals.values.yaml`을 참고한다. 별도 도메인을 선택할 때는 `enabled: true`와 해당 DNS/TLS를 준비한다. `auto` 상태에서는 기존 wildcard와 다른 base domain을 거부한다. 외부에서 이미 사용하는 추가 이름은 `domainRentals.reservedNames`에 쉼표로 등록한다.
 
 API를 Helm 밖에서 실행할 때:
 
@@ -54,9 +67,10 @@ node --test tests/domain-rentals.test.js tests/domain-rentals-postgres.test.js
 pnpm exec prisma generate --schema prisma/schema.prisma
 pnpm typecheck
 pnpm test
-helm template raibitserver infra/helm/raibitserver -f YOUR_EXISTING_VALUES.yaml -f examples/domain-rentals.values.yaml
+helm template raibitserver infra/helm/raibitserver -f YOUR_EXISTING_VALUES.yaml
+node scripts/check-domain-rentals-helm.mjs
 ```
 
-첫 명령은 외부 DB/클라우드 없이 로직·실제 로컬 HTTP·Prisma 어댑터의 계약을 확인한다. PostgreSQL의 실제 잠금/마이그레이션, 전체 Nest/Next 빌드 및 외부 DNS/TLS 확인은 별도 운영 전 검증 대상이다. core `src/server.js` 프로토타입에는 신규 HTTP 경로를 추가하지 않았으며 이 기능의 관리 API는 운영 Nest API가 제공한다.
+첫 명령은 외부 DB/클라우드 없이 로직·실제 로컬 HTTP·Prisma 어댑터의 계약을 확인한다. CI의 PostgreSQL 작업은 기능 추가 전 스키마에서 실제 migration을 실행하고 기존 사용자 보존·2/5개 동시 생성 제한·재시도 및 재연결 후 데이터 보존을 검사한다. Helm 검사는 기존 values만으로 자동 활성화되는 최초 업데이트와 명시적 비활성화·TLS/Host 정합성을 검증한다. 전체 Nest/Next 빌드와 HTTPS 브라우저 검사는 별도 CI 작업에서 실행하고 외부 DNS/TLS는 운영 환경 검증 범위다. core `src/server.js` 프로토타입에는 신규 HTTP 경로를 추가하지 않았으며 이 기능의 관리 API는 운영 Nest API가 제공한다.
 
 운영 배포 후 각각 일반/동아리 계정에서 2개/5개와 다음 생성의 409를 확인하고, 테스트 대여 호스트에 `curl -I`로 302·Location·no-store를 확인한다. 목적지 변경, 일시 중지, 삭제 후 재접속도 점검한다. 설정/DB 접근이 실패하면 목적지로 우회하지 않고 실패 응답을 반환한다.

@@ -288,6 +288,17 @@ ingress:
   tls:
     enabled: false
     existingSecret: ""
+# Existing production Traefik installations gain rentals on their next normal
+# update, without changing production-values.yaml or reinstalling the timer.
+domainRentals:
+  # auto = production + ingress + Traefik; false is an explicit opt-out.
+  enabled: auto
+  # Empty reuses the existing wildcard base domain and wildcard TLS Secret.
+  baseDomain: ""
+  tlsSecret: ""
+  reservedNames: ""
+  # Existing gateway/fallback annotations are inherited; priority stays at 2.
+  annotations: {}
 migration:
   enabled: true
   activeDeadlineSeconds: 300

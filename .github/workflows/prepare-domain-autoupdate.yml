@@ -1,0 +1,83 @@
+name: Prepare domain auto-update
+
+on:
+  push:
+    branches: [feat/domain-rentals-20260929]
+    paths: [.github/workflows/prepare-domain-autoupdate.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: github.repository == 'jsk1004ha/RaibitServer' && github.ref == 'refs/heads/feat/domain-rentals-20260929'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify and apply the exact reviewed patch
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/domain-autoupdate-candidate"
+          cp .github/domain-autoupdate.patch.gz.b64 "$RUNNER_TEMP/domain-autoupdate-candidate/transport.b64"
+          base64 --decode .github/domain-autoupdate.patch.gz.b64 | gzip --decompress > "$RUNNER_TEMP/review.patch"
+          echo "e669e130703f4964d56642e7e3959d2d6e278339c3201d79232b73f0f83a0843  $RUNNER_TEMP/review.patch" | sha256sum --check
+          git apply --check --index "$RUNNER_TEMP/review.patch"
+          git apply --index "$RUNNER_TEMP/review.patch"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+      - run: pnpm install --frozen-lockfile
+      - name: Check first-update guards and actual Helm output
+        run: |
+          set -o pipefail
+          node --test tests/domain-rentals-auto-update.test.js | tee "$RUNNER_TEMP/domain-autoupdate-candidate/test.log"
+          node scripts/check-domain-rentals-helm.mjs | tee "$RUNNER_TEMP/domain-autoupdate-candidate/helm.log"
+          git diff --cached --check
+      - name: Publish blobs, not commits or references
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git rm .github/domain-autoupdate.patch.gz.b64 .github/workflows/prepare-domain-autoupdate.yml
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const repo = 'jsk1004ha/RaibitServer';
+          if (process.env.GITHUB_REPOSITORY !== repo || process.env.GITHUB_REF !== 'refs/heads/feat/domain-rentals-20260929') throw new Error('scope mismatch');
+          const tree = [];
+          for (const change of git('diff', '--cached', '--name-status', '--no-renames').split('\n')) {
+            const [status, path] = change.split('\t');
+            if (!/^[AMD]$/.test(status) || !path || path.startsWith('/') || path.includes('..')) throw new Error('unexpected path');
+            if (status === 'D') { tree.push({ path, mode: '100644', type: 'blob', sha: null }); continue; }
+            const result = await fetch(`https://api.github.com/repos/${repo}/git/blobs`, {
+              method: 'POST', headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'x-github-api-version': '2022-11-28' },
+              body: JSON.stringify({ content: fs.readFileSync(path).toString('base64'), encoding: 'base64' }),
+            });
+            const blob = await result.json();
+            if (!result.ok) throw new Error(`blob upload ${result.status}`);
+            const mode = git('ls-files', '--stage', path).split(' ')[0];
+            tree.push({ path, mode, type: 'blob', sha: blob.sha });
+          }
+          const candidate = { parent: git('rev-parse', 'HEAD'), base_tree: git('rev-parse', 'HEAD^{tree}'), tree };
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/domain-autoupdate-candidate/candidate.json`, JSON.stringify(candidate, null, 2));
+          console.log(JSON.stringify(candidate, null, 2));
+          // Only the authorized connector will publish the reviewed tree/commit.
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: domain-autoupdate-candidate
+          path: ${{ runner.temp }}/domain-autoupdate-candidate
+          retention-days: 2

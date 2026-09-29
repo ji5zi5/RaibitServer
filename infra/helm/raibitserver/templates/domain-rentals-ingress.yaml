@@ -1,0 +1,31 @@
+{{- $rentals := include "raibitserver.domainRentals.config" . | fromJson }}
+{{- if $rentals.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "raibitserver.fullname" . }}-domain-rentals
+  labels:
+    {{- include "raibitserver.commonLabels" . | nindent 4 }}
+  annotations:
+    # Inherit existing entrypoints/TLS settings, but not fallback priority 1.
+    {{- toYaml $rentals.annotations | nindent 4 }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if $rentals.tlsSecret }}
+  tls:
+    - hosts: [{{ printf "*.%s" $rentals.baseDomain | quote }}]
+      secretName: {{ $rentals.tlsSecret | quote }}
+  {{- end }}
+  rules:
+    - host: {{ printf "*.%s" $rentals.baseDomain | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "raibitserver.fullname" . }}-api
+                port: { name: http }
+{{- end }}

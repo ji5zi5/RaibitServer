@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DomainRentalSchema, DomainRentalListSchema, DomainRentalCreateSchema, DomainRentalUpdateSchema, DomainRentalDeleteSchema, DomainRentalDeletedSchema } from './domain-rentals.ts';
 import { DeploymentOperationInputSchema } from './deployment-operation.ts';
 import { DeploymentHistoryQuerySchema, DeploymentHistoryResponseSchema, DeploymentHistoryRowSchema } from './deployment-history.ts';
 import { ResourceBackupCreateSchema, ResourceBackupDeleteSchema, ResourceBackupListSchema, ResourceBackupListViewSchema, ResourceBackupViewSchema, ResourceRestoreCreateSchema, ResourceRestoreViewSchema } from './resource-recovery.ts';
@@ -48,6 +49,10 @@ function operation<I extends z.ZodType, O extends z.ZodType>(spec: { readonly me
 // A transport contract, not a list of claimed Nest handlers. Runtime parity discovers
 // the independent module graph and verifies every verb, path, status and permission.
 export const apiOperations = {
+  'domain-rentals-list': operation({ method: 'get', path: '/domain-rentals', status: 200, permission: 'project:read', input: noInput, response: DomainRentalListSchema }),
+  'domain-rentals-create': operation({ method: 'post', path: '/domain-rentals', status: 201, permission: 'project:read', input: input(M.Empty, M.Empty, DomainRentalCreateSchema), response: DomainRentalSchema }),
+  'domain-rentals-update': operation({ method: 'post', path: '/domain-rentals/{id}/update', status: 200, permission: 'project:read', input: input(z.object({ id }), M.Empty, DomainRentalUpdateSchema), response: DomainRentalSchema }),
+  'domain-rentals-delete': operation({ method: 'post', path: '/domain-rentals/{id}/delete', status: 200, permission: 'project:read', input: input(z.object({ id }), M.Empty, DomainRentalDeleteSchema), response: DomainRentalDeletedSchema }),
   'deployments-retry': operation({ method: 'post', path: '/deployments/{deploymentId}/retry', status: 202, permission: 'deploy:run', input: input(deployment, M.Empty, DeploymentOperationInputSchema), response: M.DeploymentOperationResult }),
   'services-redeploy': operation({ method: 'post', path: '/services/{serviceId}/redeploy', status: 202, permission: 'deploy:run', input: input(service, M.Empty, DeploymentOperationInputSchema), response: M.DeploymentOperationResult }),
   'health': operation({ method: 'get', path: '/health', status: 200, permission: null, input: noInput, response: z.object({ status: z.literal('ok'), service: z.literal('raibitserver-api'), uptimeSeconds: z.number().int().nonnegative() }) }),

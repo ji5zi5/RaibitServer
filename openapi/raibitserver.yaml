@@ -3,12 +3,121 @@ x-resource-capability-source: test-fixtures/contracts/resource-capabilities-v1.j
 info:
   title: RAIBITSERVER API
   version: 0.4.0
-  description: Implemented Nest control-plane operations. Prototype-only and
-    planned operations are not advertised. Deployment activity and per-service
-    runtime log streams resume from bounded, scope-bound Last-Event-ID tokens.
+  description: Implemented Nest control-plane operations. Prototype-only and planned operations are not advertised. Deployment activity and per-service runtime log streams resume from bounded, scope-bound Last-Event-ID tokens.
 servers:
   - url: http://localhost:3000/api
 paths:
+  /domain-rentals:
+    get:
+      operationId: domain-rentals-list
+      parameters: []
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/domain-rentals-listResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+    post:
+      operationId: domain-rentals-create
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/domain-rentals-createBody"
+      responses:
+        "201":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/domain-rentals-createResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+  /domain-rentals/{id}/update:
+    post:
+      operationId: domain-rentals-update
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/domain-rentals-updateBody"
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/domain-rentals-createResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+  /domain-rentals/{id}/delete:
+    post:
+      operationId: domain-rentals-delete
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/domain-rentals-deleteBody"
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/domain-rentals-deleteResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
   /deployments/{deploymentId}/retry:
     post:
       operationId: deployments-retry
@@ -373,9 +482,7 @@ paths:
               - codeVerifier
               - error
             additionalProperties: false
-      description: Exactly one of code or error=access_denied is required. Both
-        variants require the same single-use state, verifier and exact redirect
-        binding.
+      description: Exactly one of code or error=access_denied is required. Both variants require the same single-use state, verifier and exact redirect binding.
       security: []
       x-permission: null
   /auth/me:
@@ -2279,15 +2386,13 @@ paths:
               $ref: "#/components/schemas/ResourceInput"
       responses:
         "201":
-          description: Resource desired state created; this does not confirm runtime
-            readiness or release support.
+          description: Resource desired state created; this does not confirm runtime readiness or release support.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Resource"
         "400":
-          description: Unsupported engine or managed backup/restore request rejected
-            before desired-state persistence.
+          description: Unsupported engine or managed backup/restore request rejected before desired-state persistence.
           content:
             application/json:
               schema:
@@ -2298,10 +2403,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
-      description: Creates desired state for canonical local engines only.
-        Dedicated-local databases/cache and local SQLite are implemented;
-        unsupported catalog engines remain disabled. No release readiness or
-        managed backup/restore workflow is claimed.
+      description: Creates desired state for canonical local engines only. Dedicated-local databases/cache and local SQLite are implemented; unsupported catalog engines remain disabled. No release readiness or managed backup/restore workflow is claimed.
       security:
         - bearerAuth: []
       x-permission: db:create
@@ -5399,32 +5501,28 @@ components:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         livenessPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         readinessPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         publicHealthPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         healthCheck:
           anyOf:
@@ -5434,8 +5532,7 @@ components:
                   type: string
                   maxLength: 1024
                   pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-                  description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                    segments or encoded separators/controls
+                  description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
               required:
                 - path
               additionalProperties: false
@@ -5475,32 +5572,28 @@ components:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         livenessPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         readinessPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         publicHealthPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         healthCheck:
           anyOf:
@@ -5510,8 +5603,7 @@ components:
                   type: string
                   maxLength: 1024
                   pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-                  description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                    segments or encoded separators/controls
+                  description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
               required:
                 - path
               additionalProperties: false
@@ -5738,6 +5830,203 @@ components:
         - payload
       additionalProperties:
         $ref: "#/components/schemas/JsonValue"
+    domain-rentals-listResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        baseDomain:
+          type: string
+          minLength: 1
+        nameMaxLength:
+          type: number
+          const: 63
+        targetMaxLength:
+          type: number
+          const: 4096
+        accountType:
+          type: string
+          enum:
+            - CLUB_MEMBER
+            - NON_CLUB
+        limit:
+          anyOf:
+            - type: number
+              const: 2
+            - type: number
+              const: 5
+        used:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        remaining:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        rentals:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 1
+              ownerUserId:
+                type: string
+                minLength: 1
+              hostname:
+                type: string
+                minLength: 1
+              targetUrl:
+                type: string
+                minLength: 1
+                maxLength: 4096
+              enabled:
+                type: boolean
+              version:
+                type: integer
+                minimum: 1
+                maximum: 9007199254740991
+              createdAt:
+                type: string
+                format: date-time
+                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+              updatedAt:
+                type: string
+                format: date-time
+                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+              name:
+                type: string
+                minLength: 1
+                maxLength: 63
+              url:
+                type: string
+                format: uri
+              quotaSuspended:
+                type: boolean
+            required:
+              - id
+              - ownerUserId
+              - hostname
+              - targetUrl
+              - enabled
+              - version
+              - createdAt
+              - updatedAt
+              - name
+              - url
+              - quotaSuspended
+            additionalProperties: false
+      required:
+        - baseDomain
+        - nameMaxLength
+        - targetMaxLength
+        - accountType
+        - limit
+        - used
+        - remaining
+        - rentals
+      additionalProperties: false
+    domain-rentals-createResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+        ownerUserId:
+          type: string
+          minLength: 1
+        hostname:
+          type: string
+          minLength: 1
+        targetUrl:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        enabled:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        createdAt:
+          type: string
+          format: date-time
+          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+        updatedAt:
+          type: string
+          format: date-time
+          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+      required:
+        - id
+        - ownerUserId
+        - hostname
+        - targetUrl
+        - enabled
+        - version
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+    domain-rentals-createBody:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+        targetUrl:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        enabled:
+          type: boolean
+      required:
+        - name
+        - targetUrl
+      additionalProperties: false
+    domain-rentals-updateBody:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 63
+        targetUrl:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+      required:
+        - expectedVersion
+      additionalProperties: false
+    domain-rentals-deleteResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+      required:
+        - ok
+      additionalProperties: false
+    domain-rentals-deleteBody:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+      required:
+        - expectedVersion
+      additionalProperties: false
     deployments-retryBody:
       $schema: https://json-schema.org/draft/2020-12/schema
       type: object
@@ -6749,32 +7038,28 @@ components:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         livenessPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         readinessPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         publicHealthPath:
           anyOf:
             - type: string
               maxLength: 1024
               pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                segments or encoded separators/controls
+              description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
             - type: "null"
         healthCheck:
           anyOf:
@@ -6784,8 +7069,7 @@ components:
                   type: string
                   maxLength: 1024
                   pattern: ^\/(?!\/)[^\\\s?#\u0000-\u001f\u007f]*$
-                  description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot
-                    segments or encoded separators/controls
+                  description: Safe absolute path, max 1024 UTF-8 bytes; no query, fragment, dot segments or encoded separators/controls
               required:
                 - path
               additionalProperties: false
@@ -6799,13 +7083,11 @@ components:
                 cpu:
                   type: string
                   pattern: ^(?:\d+(?:\.\d{1,3})?|\d+m)$
-                  description: Positive CPU quantity; increases require the authenticated actor
-                    quota (500m fallback)
+                  description: Positive CPU quantity; increases require the authenticated actor quota (500m fallback)
                 memory:
                   type: string
                   pattern: ^\d+(?:Mi|Gi)$
-                  description: Positive memory quantity; increases require the authenticated actor
-                    quota (512Mi fallback)
+                  description: Positive memory quantity; increases require the authenticated actor quota (512Mi fallback)
               additionalProperties: false
             limits:
               type: object
@@ -6813,13 +7095,11 @@ components:
                 cpu:
                   type: string
                   pattern: ^(?:\d+(?:\.\d{1,3})?|\d+m)$
-                  description: Positive CPU quantity; increases require the authenticated actor
-                    quota (500m fallback)
+                  description: Positive CPU quantity; increases require the authenticated actor quota (500m fallback)
                 memory:
                   type: string
                   pattern: ^\d+(?:Mi|Gi)$
-                  description: Positive memory quantity; increases require the authenticated actor
-                    quota (512Mi fallback)
+                  description: Positive memory quantity; increases require the authenticated actor quota (512Mi fallback)
               additionalProperties: false
           additionalProperties: false
         persistence:

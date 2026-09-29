@@ -22,6 +22,7 @@ const { createApiHandler } = await import('../packages/core/src/api.ts');
 const { RAIBITSERVERControlPlane, ResourceCapabilityUnavailable, ResourceIntentInvalid } = await import('../packages/core/src/index.ts');
 const { createSessionToken, hashPassword, normalizeEmail, shouldPromoteFirstLogin, verifyPasswordAsync } = await import('../packages/core/src/identity.ts');
 const schemas = await import('../packages/schemas/src/index.ts');
+const domainRentals = await import('../packages/core/src/domain-rentals.ts');
 const UnmatchedCoreError = class extends Error {};
 
 test('compatibility API login runs one async scrypt for every account state', async () => {
@@ -274,6 +275,7 @@ async function loadNestService(repository) {
   const require = (specifier) => {
     if (specifier === '@nestjs/common') return nest;
     if (specifier === '@raibitserver/core') return core;
+    if (specifier === '@raibitserver/core/domain-rentals') return domainRentals;
     if (specifier === '@raibitserver/schemas') return schemas;
     throw new Error(`unexpected module import: ${specifier}`);
   };

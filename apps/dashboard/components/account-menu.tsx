@@ -1,6 +1,6 @@
 'use client';
 
-import { LogOutIcon, ShieldCheckIcon } from 'lucide-react';
+import { GlobeIcon, LogOutIcon, ShieldCheckIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { UserAvatar } from './user-avatar';
@@ -35,6 +35,7 @@ export function AccountMenu({ avatarUrl, email, logoutAction, name, organization
       <DropdownMenuGroup>
         <DropdownMenuLabel className="space-y-1"><span className="block truncate text-sm text-foreground">{label}</span><span className="block truncate font-normal">{email || '이메일 정보 없음'}</span><span className="block font-normal">{organization} · {role}</span></DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem render={<a href="/account/domains" />}><GlobeIcon />도메인 대여</DropdownMenuItem>
         <DropdownMenuItem render={<a href="/account/security" />}><ShieldCheckIcon />계정 보안</DropdownMenuItem>
         <DropdownMenuSeparator />
         <form action={logoutAction} method="post"><input name="_returnTo" type="hidden" value="/login" /><DropdownMenuItem nativeButton render={<button type="submit" />} variant="destructive"><LogOutIcon />로그아웃</DropdownMenuItem></form>

@@ -13,8 +13,6 @@ jobs:
     if: github.repository == 'jsk1004ha/RaibitServer' && github.ref == 'refs/heads/feat/domain-rentals-20260929'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,46 +39,24 @@ jobs:
           git add openapi/raibitserver.yaml
           git rm .github/domain-review.patch.1.b64 .github/domain-review.patch.2.b64 .github/workflows/apply-domain-review.yml
           git diff --cached --check
-      - name: Prepare an unreferenced commit for explicit connector publication
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Export local Git manifest for explicit connector publication
         run: |
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import { execFileSync } from 'node:child_process';
-          const repo = 'jsk1004ha/RaibitServer';
-          if (process.env.GITHUB_REPOSITORY !== repo || process.env.GITHUB_REF !== 'refs/heads/feat/domain-rentals-20260929') throw new Error('branch scope mismatch');
-          const api = async (endpoint, body) => {
-            const response = await fetch(`https://api.github.com/repos/${repo}/git/${endpoint}`, {
-              method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'x-github-api-version': '2022-11-28' },
-              ...(body ? { body: JSON.stringify(body) } : {}),
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(`${endpoint}: ${response.status} ${result.message}`);
-            return result;
-          };
-          const parent = await api(`commits/${process.env.GITHUB_SHA}`);
-          const changes = execFileSync('git', ['diff', '--cached', '--name-status', '--no-renames'], { encoding: 'utf8' }).trim().split('\n');
-          const tree = [];
-          for (const change of changes) {
+          const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const changes = git('diff', '--cached', '--name-status', '--no-renames').split('\n');
+          const tree = changes.map((change) => {
             const [status, path] = change.split('\t');
             if (!/^[AMD]$/.test(status) || !path || path.startsWith('/') || path.includes('..')) throw new Error('unexpected patch path');
-            if (status === 'D') tree.push({ path, mode: '100644', type: 'blob', sha: null });
-            else {
-              const blob = await api('blobs', { content: fs.readFileSync(path).toString('base64'), encoding: 'base64' });
-              tree.push({ path, mode: '100644', type: 'blob', sha: blob.sha });
-            }
-          }
-          const nextTree = await api('trees', { base_tree: parent.tree.sha, tree });
-          const commit = await api('commits', {
-            message: 'fix(domains): address review, contract parity and account rental UI\n\nShare memory namespace locking, register the reviewed migration, regenerate\nOpenAPI, and add real JWT/Nest and HTTPS browser regression coverage.',
-            tree: nextTree.sha, parents: [process.env.GITHUB_SHA],
+            return { path, mode: '100644', type: 'blob', sha: status === 'D' ? null : git('hash-object', path) };
           });
-          // Deliberately do not update any branch or tag. The connector publishes
-          // this exact candidate after inspecting the preparation result.
-          fs.mkdirSync(`${process.env.RUNNER_TEMP}/domain-review-candidate`, { recursive: true });
-          fs.writeFileSync(`${process.env.RUNNER_TEMP}/domain-review-candidate/candidate.json`, JSON.stringify({ parent: parent.sha, commit: commit.sha, tree: nextTree.sha, paths: tree.map((entry) => entry.path) }, null, 2));
-          console.log(`Prepared candidate ${commit.sha}; no refs updated.`);
+          const candidate = { parent: git('rev-parse', 'HEAD'), base_tree: git('rev-parse', 'HEAD^{tree}'), tree };
+          const output = `${process.env.RUNNER_TEMP}/domain-review-candidate`;
+          fs.mkdirSync(output, { recursive: true });
+          fs.writeFileSync(`${output}/candidate.json`, JSON.stringify(candidate, null, 2));
+          fs.writeFileSync(`${output}/review.patch`, execFileSync('git', ['diff', '--cached', '--binary']));
+          console.log(JSON.stringify(candidate, null, 2));
           JS
       - uses: actions/upload-artifact@v4
         with:

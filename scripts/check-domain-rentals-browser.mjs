@@ -19,7 +19,7 @@ const output = process.env.RAIBIT_DOMAIN_EVIDENCE || path.join(os.tmpdir(), 'rai
 await fs.mkdir(output, { recursive: true });
 const privateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'raibit-rental-tls-'));
 const report = { cases: [], screenshots: [], passed: false, browserErrors: [] };
-let api, next, proxy, browser;
+let api, next, proxy, browser, page;
 let nextLog = '';
 const check = async (name, work) => { await work(); report.cases.push({ name, passed: true }); console.log(`PASS ${name}`); };
 const port = async () => { const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const value = server.address().port; await new Promise((resolve) => server.close(resolve)); return value; };
@@ -48,8 +48,8 @@ try {
   proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening');
   const origin = `https://127.0.0.1:${proxy.address().port}`;
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
-  const page = await context.newPage();
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1200 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  page = await context.newPage();
   page.on('pageerror', (error) => report.browserErrors.push(error.message));
   const login = async (account) => {
     await context.clearCookies();
@@ -64,7 +64,13 @@ try {
     await page.getByRole('button', { name: '주소 대여', exact: true }).click();
     await expect(row(name)).toBeVisible(); await expect(page.getByLabel('주소 이름', { exact: true })).toHaveValue('');
   };
-  const screenshot = async (name) => { await page.screenshot({ path: path.join(output, name), fullPage: true }); report.screenshots.push(name); };
+  const screenshot = async (name, focus) => {
+    // The console has its own scroll container; fullPage captures empty space
+    // outside that viewport. Keep real layout/CSS and scroll, without restyling.
+    if (focus) await focus.scrollIntoViewIfNeeded();
+    else await page.evaluate(() => { for (const element of document.querySelectorAll('*')) if (element.scrollTop) element.scrollTop = 0; window.scrollTo(0, 0); });
+    await page.screenshot({ path: path.join(output, name), fullPage: false }); report.screenshots.push(name);
+  };
   await check('Unauthenticated rental page requires login', async () => {
     await page.goto(origin + '/account/domains'); await expect(page).toHaveURL(/\/login\?/);
   });
@@ -104,18 +110,22 @@ try {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await screenshot('domains-mobile.png');
+    await screenshot('domains-mobile-editor.png', page.getByLabel('연결할 주소', { exact: true }));
+    await screenshot('domains-mobile-addresses.png', row(longName));
+    const box = await row(longName).boundingBox(); assert.ok(box && box.x >= 0 && box.x + box.width <= 390);
     await page.emulateMedia({ colorScheme: 'dark' });
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     await screenshot('domains-mobile-dark.png');
     await page.evaluate(() => document.documentElement.classList.remove('dark'));
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.setViewportSize({ width: 1440, height: 1200 });
   });
   await check('Stale edits block further writes until explicit refresh', async () => {
     await row('my-site').getByRole('button', { name: '수정', exact: true }).click();
     const current = (await api.request(ordinary.token, '/domain-rentals')).body.rentals.find((r) => r.name === 'my-site');
     assert.equal((await api.request(ordinary.token, `/domain-rentals/${current.id}/update`, { expectedVersion: current.version, targetUrl: 'https://example.org/newest' })).status, 200);
     await page.getByRole('button', { name: '변경 저장' }).click();
-    await expect(page.getByRole('alert')).toContainText('다른 화면에서 변경');
+    await expect(page.locator('[data-domain-rentals]').getByRole('alert')).toContainText('다른 화면에서 변경');
     await expect(page.getByRole('button', { name: '변경 저장' })).toBeDisabled();
     await page.getByRole('button', { name: '목록 새로고침' }).click();
     await expect(row('my-site')).toContainText('https://example.org/newest');
@@ -123,6 +133,7 @@ try {
   await check('Delete confirmation can be cancelled and frees one quota slot', async () => {
     await row(longName).getByRole('button', { name: '삭제', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
+    await screenshot('domains-delete-confirmation.png', page.getByRole('dialog'));
     await page.getByRole('dialog').getByRole('button', { name: '취소', exact: true }).click();
     await expect(row(longName)).toBeVisible();
     assert.equal((await api.request(ordinary.token, '/domain-rentals')).body.used, 2);
@@ -142,6 +153,7 @@ try {
   assert.deepEqual(report.browserErrors, []); report.passed = true;
 } catch (error) {
   report.failure = error.stack; process.exitCode = 1; console.error(error);
+  if (page && !page.isClosed()) { try { await page.screenshot({ path: path.join(output, 'failure.png') }); } catch {} }
 } finally {
   await fs.writeFile(path.join(output, 'browser-report.json'), JSON.stringify(report, null, 2));
   await fs.writeFile(path.join(output, 'next.log'), nextLog);

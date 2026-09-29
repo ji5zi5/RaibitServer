@@ -24,6 +24,17 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/domain-autoupdate-candidate"
           cp .github/domain-autoupdate.patch.gz.b64 "$RUNNER_TEMP/domain-autoupdate-candidate/transport.b64"
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p = Path('.github/domain-autoupdate.patch.gz.b64')
+          s = p.read_text().strip()
+          assert hashlib.sha256(s.encode()).hexdigest() == 'f9adf7059d34beb300f4c7d3696766f4c3266ba99a4f4e755a5fc16774f9022f'
+          for a, b, before, after in [(3577,3578,'W',''),(296,298,'fC','V')]:
+              assert s[a:b] == before
+              s = s[:a] + after + s[b:]
+          p.write_text(s + '\n')
+          PY
           base64 --decode .github/domain-autoupdate.patch.gz.b64 | gzip --decompress > "$RUNNER_TEMP/review.patch"
           echo "e669e130703f4964d56642e7e3959d2d6e278339c3201d79232b73f0f83a0843  $RUNNER_TEMP/review.patch" | sha256sum --check
           git apply --check --index "$RUNNER_TEMP/review.patch"
@@ -49,7 +60,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git rm .github/domain-autoupdate.patch.gz.b64 .github/workflows/prepare-domain-autoupdate.yml
+          git rm -f .github/domain-autoupdate.patch.gz.b64 .github/workflows/prepare-domain-autoupdate.yml
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import { execFileSync } from 'node:child_process';

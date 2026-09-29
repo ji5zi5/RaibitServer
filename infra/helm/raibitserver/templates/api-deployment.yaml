@@ -36,6 +36,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - { name: NODE_ENV, value: production }
+            {{- $rentals := .Values.domainRentals | default dict }}
+            - name: RAIBITSERVER_DOMAIN_RENTAL_BASE_DOMAIN
+              value: {{ $rentals.baseDomain | default "raibit.kr" | quote }}
+            - name: RAIBITSERVER_DOMAIN_RENTAL_RESERVED_NAMES
+              value: {{ $rentals.reservedNames | default "" | quote }}
             - name: RAIBITSERVER_RESOURCE_ENVIRONMENT
               value: {{ ternary "release" "local" .Values.production | quote }}
             {{- range $provider := (include "raibitserver.localProviderEngines" . | fromJsonArray) }}

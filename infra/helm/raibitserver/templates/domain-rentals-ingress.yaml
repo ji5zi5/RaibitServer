@@ -1,0 +1,33 @@
+{{- $rentals := .Values.domainRentals | default dict }}
+{{- if and .Values.ingress.enabled ($rentals.enabled | default false) }}
+{{- $base := $rentals.baseDomain | default "raibit.kr" }}
+{{- $secret := $rentals.tlsSecret | default .Values.ingress.tls.existingSecret }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "raibitserver.fullname" . }}-domain-rentals
+  labels:
+    {{- include "raibitserver.commonLabels" . | nindent 4 }}
+  annotations:
+    # Above hosted-errors fallback (1), below explicit platform/workload routes.
+    traefik.ingress.kubernetes.io/router.priority: "2"
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if $secret }}
+  tls:
+    - hosts: [{{ printf "*.%s" $base | quote }}]
+      secretName: {{ $secret | quote }}
+  {{- end }}
+  rules:
+    - host: {{ printf "*.%s" $base | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "raibitserver.fullname" . }}-api
+                port: { name: http }
+{{- end }}

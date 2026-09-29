@@ -28,7 +28,16 @@ test('Given a clean checkout and no report override, when real Nest parity runs,
       await writeFile(prefix + '.metadata.json', JSON.stringify({ command: process.execPath, args, cwd: sandbox, status: result.status, before: before.stdout, after: after.stdout }, null, 2));
     }
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /checked=109; HTTP=44; cleanup=true/, 'the child must execute real Nest parity, not skip nested tests');
+    // The four standalone rental operations also run real HTTP CRUD scenarios.
+    assert.match(result.stdout, /checked=113; HTTP=48; cleanup=true/, 'the child must execute real Nest parity, not skip nested tests');
+    const reportLine = result.stdout.split('\n').find((line) => line.startsWith('{"apiOperationParity":'));
+    assert.ok(reportLine, 'the child must emit structured parity evidence');
+    const report = JSON.parse(reportLine).apiOperationParity;
+    assert.equal(report.passed, true);
+    for (const operationId of ['domain-rentals-list', 'domain-rentals-create', 'domain-rentals-update', 'domain-rentals-delete']) {
+      assert.ok(report.operations.some((operation) => operation.operationId === operationId), `${operationId}: SDK wire evidence missing`);
+      assert.ok(report.http.some((operation) => operation.operationId === operationId && operation.schemaValid), `${operationId}: real HTTP evidence missing`);
+    }
     assert.equal(after.status, 0);
     assert.equal(after.stdout, before.stdout, 'default parity reporting must not create checkout files');
   } finally { await rm(sandbox, { recursive: true, force: true }); }

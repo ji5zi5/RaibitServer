@@ -1,0 +1,39 @@
+name: Domain rentals
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Domain rental regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Core, redirect and repository contracts
+        run: node --test tests/domain-rentals.test.js tests/domain-rentals-postgres.test.js
+      - name: Record exact tested revision
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/domain-rental-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/domain-rental-evidence/revision.txt"
+          git archive --format=tar.gz HEAD -o "$RUNNER_TEMP/domain-rental-evidence/source.tar.gz"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: domain-rental-evidence
+          path: ${{ runner.temp }}/domain-rental-evidence
+          retention-days: 2

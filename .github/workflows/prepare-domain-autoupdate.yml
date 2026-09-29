@@ -51,12 +51,30 @@ jobs:
           cat > tests/domain-rentals-upgrade-api.test.js <<'JS'
           import test from 'node:test';
           import { createRequire } from 'node:module';
-          import { bootRentalRuntime } from './fixtures/domain-rentals-runtime.mjs';
+          // Register the existing Nest TypeScript loader, not its unprefixed
+          // parity server. This test reproduces main.ts's production routing.
+          import './fixtures/api-parity-runtime.mjs';
+          const require = createRequire(new URL('../apps/api/package.json', import.meta.url));
+          const { NestFactory } = require('@nestjs/core');
+          const { AppModule } = require('./src/app.module.ts');
+          const { DomainRentalsService } = require('./src/modules/domain-rentals/domain-rentals.module.ts');
           const { verifyApi } = createRequire(import.meta.url)('../infra/helm/raibitserver/files/domain-rentals-upgrade-check.cjs');
-          test('post-upgrade probe validates the real Nest health, auth and rental Host middleware', async (t) => {
-            const runtime = await bootRentalRuntime();
-            t.after(() => runtime.close());
-            await verifyApi({ apiUrl: runtime.baseUrl, apiHost: 'api.raibit.kr', baseDomain: 'raibit.kr' });
+          test('post-upgrade probe validates real Nest with production prefix and Host middleware', async (t) => {
+            process.env.NODE_ENV = 'test';
+            process.env.RAIBITSERVER_AUTH_MODE = 'jwt';
+            process.env.RAIBITSERVER_AUTH_JWT_SECRET = 'local-upgrade-probe-test-secret-only';
+            process.env.RAIBITSERVER_ALLOW_MEMORY_PERSISTENCE = '1';
+            process.env.RAIBITSERVER_DOMAIN_RENTAL_BASE_DOMAIN = 'raibit.kr';
+            delete process.env.DATABASE_URL;
+            const app = await NestFactory.create(AppModule, { logger: false, rawBody: true, abortOnError: false });
+            t.after(() => app.close());
+            const rentals = app.get(DomainRentalsService);
+            app.use((req, res, next) => {
+              void rentals.redirect(req, res).then((handled) => { if (!handled) next(); }).catch(next);
+            });
+            app.setGlobalPrefix('api');
+            await app.listen(0, '127.0.0.1');
+            await verifyApi({ apiUrl: await app.getUrl(), apiHost: 'api.raibit.kr', baseDomain: 'raibit.kr' });
           });
           JS
           git add scripts/check-domain-rentals-helm.mjs tests/domain-rentals-upgrade-api.test.js
@@ -74,8 +92,8 @@ jobs:
       - name: Check first-update guards and actual Helm output
         run: |
           set -o pipefail
-          node --import ./tests/fixtures/resource-runtime.mjs --test tests/domain-rentals-auto-update.test.js tests/domain-rentals-upgrade-api.test.js | tee "$RUNNER_TEMP/domain-autoupdate-candidate/test.log"
-          node scripts/check-domain-rentals-helm.mjs | tee "$RUNNER_TEMP/domain-autoupdate-candidate/helm.log"
+          node --import ./tests/fixtures/resource-runtime.mjs --test tests/domain-rentals-auto-update.test.js tests/domain-rentals-upgrade-api.test.js 2>&1 | tee "$RUNNER_TEMP/domain-autoupdate-candidate/test.log"
+          node scripts/check-domain-rentals-helm.mjs 2>&1 | tee "$RUNNER_TEMP/domain-autoupdate-candidate/helm.log"
           git diff --cached --check
       - name: Publish blobs, not commits or references
         env:

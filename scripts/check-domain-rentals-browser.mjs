@@ -71,6 +71,11 @@ try {
     else await page.evaluate(() => { for (const element of document.querySelectorAll('*')) if (element.scrollTop) element.scrollTop = 0; window.scrollTo(0, 0); });
     await page.screenshot({ path: path.join(output, name), fullPage: false }); report.screenshots.push(name);
   };
+  const selectTheme = async (label, value) => {
+    await page.locator('button[aria-label^="테마 설정: 현재"]:visible').click();
+    await page.getByRole('menuitemradio', { name: label, exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', value);
+  };
   await check('Unauthenticated rental page requires login', async () => {
     await page.goto(origin + '/account/domains'); await expect(page).toHaveURL(/\/login\?/);
   });
@@ -113,11 +118,18 @@ try {
     await screenshot('domains-mobile-editor.png', page.getByLabel('연결할 주소', { exact: true }));
     await screenshot('domains-mobile-addresses.png', row(longName));
     const box = await row(longName).boundingBox(); assert.ok(box && box.x >= 0 && box.x + box.width <= 390);
-    await page.emulateMedia({ colorScheme: 'dark' });
-    await page.evaluate(() => document.documentElement.classList.add('dark'));
+  });
+  await check('Built-in theme menu applies and persists dark and light modes', async () => {
+    // Use the application's data-theme menu and cookie, not a synthetic .dark
+    // class: otherwise existing components and custom tokens can disagree.
+    await selectTheme('다크', 'dark');
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(row(longName)).toBeVisible();
     await screenshot('domains-mobile-dark.png');
-    await page.evaluate(() => document.documentElement.classList.remove('dark'));
-    await page.emulateMedia({ colorScheme: 'light' });
+    await screenshot('domains-mobile-dark-addresses.png', row(longName));
+    await selectTheme('라이트', 'light');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await page.setViewportSize({ width: 1440, height: 1200 });
   });
   await check('Stale edits block further writes until explicit refresh', async () => {

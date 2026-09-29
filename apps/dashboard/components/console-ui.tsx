@@ -21,7 +21,7 @@ type JsonCardProps = {
   value: any;
 };
 
-type NavItemId = 'overview' | 'projects' | 'create-project' | 'github' | 'domains' | 'guide' | 'admin';
+type NavItemId = 'overview' | 'projects' | 'create-project' | 'github' | 'guide' | 'admin' | 'domains';
 
 type ShellProps = {
   children: ReactNode;

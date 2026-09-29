@@ -90,6 +90,10 @@ export function createOperationsClient(transport: OperationTransport) {
     };
   }
   return {
+    'domain-rentals-list': bind(apiOperations['domain-rentals-list']),
+    'domain-rentals-create': bind(apiOperations['domain-rentals-create']),
+    'domain-rentals-update': bind(apiOperations['domain-rentals-update']),
+    'domain-rentals-delete': bind(apiOperations['domain-rentals-delete']),
     'deployments-retry': bind(apiOperations['deployments-retry']),
     'services-redeploy': bind(apiOperations['services-redeploy']),
     'project-deployment-history': bind(apiOperations['project-deployment-history']),

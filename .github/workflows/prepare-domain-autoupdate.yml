@@ -39,6 +39,27 @@ jobs:
           echo "e669e130703f4964d56642e7e3959d2d6e278339c3201d79232b73f0f83a0843  $RUNNER_TEMP/review.patch" | sha256sum --check
           git apply --check --index "$RUNNER_TEMP/review.patch"
           git apply --index "$RUNNER_TEMP/review.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/check-domain-rentals-helm.mjs')
+          s = p.read_text()
+          before = "const named = (docs, name) => docs.find((doc) => doc.metadata?.name === name);"
+          after = "const named = (docs, name) => docs.find((doc) => doc.metadata?.name === name && doc.kind === 'Deployment') ?? docs.find((doc) => doc.metadata?.name === name);"
+          assert s.count(before) == 1
+          p.write_text(s.replace(before, after))
+          PY
+          cat > tests/domain-rentals-upgrade-api.test.js <<'JS'
+          import test from 'node:test';
+          import { createRequire } from 'node:module';
+          import { bootRentalRuntime } from './fixtures/domain-rentals-runtime.mjs';
+          const { verifyApi } = createRequire(import.meta.url)('../infra/helm/raibitserver/files/domain-rentals-upgrade-check.cjs');
+          test('post-upgrade probe validates the real Nest health, auth and rental Host middleware', async (t) => {
+            const runtime = await bootRentalRuntime();
+            t.after(() => runtime.close());
+            await verifyApi({ apiUrl: runtime.baseUrl, apiHost: 'api.raibit.kr', baseDomain: 'raibit.kr' });
+          });
+          JS
+          git add scripts/check-domain-rentals-helm.mjs tests/domain-rentals-upgrade-api.test.js
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.2
@@ -53,7 +74,7 @@ jobs:
       - name: Check first-update guards and actual Helm output
         run: |
           set -o pipefail
-          node --test tests/domain-rentals-auto-update.test.js | tee "$RUNNER_TEMP/domain-autoupdate-candidate/test.log"
+          node --import ./tests/fixtures/resource-runtime.mjs --test tests/domain-rentals-auto-update.test.js tests/domain-rentals-upgrade-api.test.js | tee "$RUNNER_TEMP/domain-autoupdate-candidate/test.log"
           node scripts/check-domain-rentals-helm.mjs | tee "$RUNNER_TEMP/domain-autoupdate-candidate/helm.log"
           git diff --cached --check
       - name: Publish blobs, not commits or references

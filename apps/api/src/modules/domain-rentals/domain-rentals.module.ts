@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpException, Injectable, Module, Par
 import type { OnModuleDestroy } from '@nestjs/common';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { resolveControlPlaneRepositoryConfig } from '@raibitserver/core';
-import { DomainRentalError, DomainRentals, MemoryDomainRentalRepository } from '@raibitserver/core/domain-rentals';
+import { DomainRentalError, DomainRentals } from '@raibitserver/core/domain-rentals';
 import { createPostgresDomainRentalRepository, type PostgresDomainRentalRepository } from '@raibitserver/core/domain-rentals-postgres';
 import { handleDomainRentalRedirect } from '@raibitserver/core/domain-rentals-http';
 import { RequirePermission } from '../../auth/permissions.decorator';
@@ -21,10 +21,7 @@ export class DomainRentalsService implements OnModuleDestroy {
         this.postgres = repository;
         return new DomainRentals(repository);
       })
-      : Promise.resolve(new DomainRentals(new MemoryDomainRentalRepository(async (id) => {
-        const { user } = await controlPlane.currentUser({ id });
-        return user;
-      })));
+      : controlPlane.domainRentalMemoryRepository().then((repository) => new DomainRentals(repository));
   }
   async onModuleDestroy() { await this.engine.catch(() => undefined); await this.postgres?.disconnect(); }
   async redirect(request: IncomingMessage, response: ServerResponse) {
@@ -41,19 +38,22 @@ export class DomainRentalsService implements OnModuleDestroy {
 
 // Personal account capability, not an organization/project write permission.
 // The core always loads the current User and enforces ownership itself.
-@RequirePermission('project:read')
 @Controller('domain-rentals')
 export class DomainRentalsController {
   constructor(private readonly rentals: DomainRentalsService) {}
+  @RequirePermission('project:read')
   @Get()
   list(@Req() req: RentalRequest) { return this.rentals.run((engine) => engine.list(owner(req))); }
+  @RequirePermission('project:read')
   @Post()
   create(@Req() req: RentalRequest, @Body() body: unknown) { return this.rentals.run((engine) => engine.create(owner(req), body)); }
+  @RequirePermission('project:read')
   @Post(':id/update')
   @HttpCode(200)
   update(@Req() req: RentalRequest, @Param('id') id: string, @Body() body: unknown) {
     return this.rentals.run((engine) => engine.update(owner(req), id, body));
   }
+  @RequirePermission('project:read')
   @Post(':id/delete')
   @HttpCode(200)
   remove(@Req() req: RentalRequest, @Param('id') id: string, @Body() body: unknown) {

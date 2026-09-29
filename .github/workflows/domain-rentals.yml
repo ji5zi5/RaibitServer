@@ -23,8 +23,13 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Core, redirect and repository contracts
-        run: node --test tests/domain-rentals.test.js tests/domain-rentals-postgres.test.js
+      - name: Core, redirect, repository and real Nest API contracts
+        run: |
+          mkdir -p "$RUNNER_TEMP/domain-rental-evidence"
+          set -o pipefail
+          node --import ./tests/fixtures/resource-runtime.mjs --test tests/domain-rentals.test.js tests/domain-rentals-postgres.test.js tests/domain-rentals-api.test.js | tee "$RUNNER_TEMP/domain-rental-evidence/regression.log"
+          node scripts/generate-openapi.mjs --check
+          node scripts/check-migration-contract.mjs
       - name: Record exact tested revision
         if: always()
         run: |
@@ -36,4 +41,36 @@ jobs:
         with:
           name: domain-rental-evidence
           path: ${{ runner.temp }}/domain-rental-evidence
-          retention-days: 2
+          retention-days: 7
+  browser:
+    name: Domain rentals / HTTPS browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: apps/dashboard
+      - run: pnpm --filter @raibitserver/dashboard build
+      - name: Real Next page, server actions, JWT auth and HTTPS cookies
+        run: node --import ./tests/fixtures/resource-runtime.mjs scripts/check-domain-rentals-browser.mjs
+        env:
+          RAIBIT_DOMAIN_EVIDENCE: ${{ runner.temp }}/domain-browser-evidence
+      - name: Record exact tested revision
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/domain-browser-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/domain-browser-evidence/revision.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: domain-rental-browser
+          path: ${{ runner.temp }}/domain-browser-evidence
+          retention-days: 7

@@ -15,13 +15,13 @@ const messages: Record<string, string> = {
   DOMAIN_RENTAL_ACCOUNT_UNAVAILABLE: '승인된 계정만 도메인을 대여할 수 있습니다.',
 };
 
-export async function mutateRental(operation: 'create' | 'update' | 'delete', id: string | null, input: unknown): Promise<{ ok: boolean; message: string }> {
+export async function mutateRental(operation: 'create' | 'update' | 'delete', id: string | null, input: unknown): Promise<{ ok: boolean; message: string; code?: string }> {
   const context = await dashboardApiContext();
   if (!context.token) return { ok: false, message: '다시 로그인해 주세요.' };
   if (!['create', 'update', 'delete'].includes(operation) || (operation !== 'create' && (typeof id !== 'string' || !id))) return { ok: false, message: '잘못된 요청입니다.' };
   const path = operation === 'create' ? '/domain-rentals' : `/domain-rentals/${encodeURIComponent(id!)}/${operation}`;
   const result = await postJson(path, input, null, context);
-  if (!result.ok) return { ok: false, message: messages[result.errorCode || ''] || result.error || '요청을 처리하지 못했습니다.' };
+  if (!result.ok) return { ok: false, code: result.errorCode, message: messages[result.errorCode || ''] || result.error || '요청을 처리하지 못했습니다.' };
   revalidatePath('/account/domains');
   return { ok: true, message: operation === 'delete' ? '주소를 삭제했습니다.' : '저장했습니다.' };
 }

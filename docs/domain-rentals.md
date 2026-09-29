@@ -32,7 +32,7 @@
 
 ## 배포 순서
 
-1. 기존 DB 백업 후 정상 배포 절차로 새 Prisma Client를 생성하고 `20260929130000_domain_rentals` 마이그레이션을 **API 교체 전에** 적용한다. `prisma db push`가 아니라 기존 `prisma migrate deploy` 경로를 사용해야 hostname 보호 트리거도 설치된다.
+1. 기존 DB 백업 후 정상 배포 절차로 새 Prisma Client를 생성하고 `202609291300_domain_rentals` 마이그레이션을 **API 교체 전에** 적용한다. `prisma db push`가 아니라 기존 `prisma migrate deploy` 경로를 사용해야 hostname 보호 트리거도 설치된다.
 2. API 및 대시보드 이미지를 빌드/배포한다. 관리 기능은 준비되지만 DNS/ingress 설정 없이는 임대 호스트에 접속할 수 없다.
 3. 기존 운영 Helm values에 `examples/domain-rentals.values.yaml`을 **추가 overlay**로 적용한다. 기본 chart에 `domainRentals.enabled`가 없거나 false이면 새로운 wildcard ingress를 만들지 않는다. overlay의 `baseDomain`은 API 환경변수에도 같은 값으로 전달된다. 원래 values의 이미지/시크릿/네트워크 설정을 유지한다.
 4. `*.raibit.kr` DNS를 기존 Traefik 게이트웨이로 연결하고 wildcard TLS 인증서를 준비한다. `domainRentals.tlsSecret`이 비어 있으면 `ingress.tls.existingSecret`을 재사용하며 인증서가 `*.raibit.kr`을 포함해야 한다. Cloudflare Tunnel 사용 시 wildcard public hostname을 같은 Traefik 원본으로 연결하고 원본 **Host 헤더를 유지**한다. 터널 설정이 `api.raibit.kr`로 Host를 덮으면 동작하지 않는다.

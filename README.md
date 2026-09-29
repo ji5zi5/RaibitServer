@@ -243,7 +243,15 @@ Tenant NetworkPolicy는 임의의 사용자 라벨이 아니라 Kubernetes 예�
 
 존재하지 않는 tenant hostname과 upstream 5xx는 공통 오류 backend로 전달할 수 있습니다. `hostedErrors.fallbackIngress.tls.existingSecret`을 비우면 기존 `ingress.tls.existingSecret`을 재사용합니다. 선택된 Secret에는 wildcard 인증서가 있어야 하며, 사용 중인 ingress-nginx 또는 Traefik 연결은 [호스팅 오류 화면 가이드](docs/hosted-error-pages.md)대로 설정하세요.
 
-> 보안 필수: `raibit.kr`의 랜딩과 `/public/sites`만 공개합니다. 로그인·가입·콘솔 경로는 `console.raibit.kr`로 이동하며 세션 쿠키는 host-only로 유지합니다. 부모 도메인 쿠키는 `apps--*.raibit.kr` 사용자 워크로드에도 bearer token을 보내므로 사용하지 않습니다. `/admin`과 관리자 메뉴는 JWT의 `userRole=ADMIN`인 계정만 사용할 수 있으며 Cloudflare Access/MFA를 추가 방어선으로 둘 수 있습니다.
+> 보안 필수: `raibit.kr`의 랜딩과 `/public/sites`는 공개합니다. 도메인 대여를 활성화하면 `*.raibit.kr` 중 대여된 주소의 **GET/HEAD 리다이렉트도 익명 공개**됩니다. 대여 관리 화면(`/account/domains`)과 `/api/domain-rentals` 관리 API는 로그인·승인·소유자 확인이 필요합니다. 로그인·가입·콘솔 경로는 `console.raibit.kr`로 이동하며 세션 쿠키는 host-only로 유지합니다. 부모 도메인 쿠키는 `apps--*.raibit.kr` 사용자 워크로드에도 bearer token을 보내므로 사용하지 않습니다. `/admin`과 관리자 메뉴는 JWT의 `userRole=ADMIN`인 계정만 사용할 수 있으며 Cloudflare Access/MFA를 추가 방어선으로 둘 수 있습니다.
+
+### 도메인만 대여하기
+
+콘솔의 **도메인 대여** 메뉴(데스크톱 사이드바·모바일 메뉴·검색·계정 메뉴)에서 서버나 프로젝트 없이 `이름.raibit.kr`을 만들고 외부 HTTP(S) 주소로 연결할 수 있습니다. **동아리원 5개, 비동아리원 2개**이며 조직별이 아닌 계정 전체 한도입니다. 일시 중지한 주소도 한도에 포함됩니다. 이름은 영문·숫자·하이픈 **1~63자**(첫 글자와 끝 글자는 영문·숫자)이며, 운영용 이름과 기존 서비스·대여 주소는 사용할 수 없습니다.
+
+화면에서 생성·이름/목적지 수정·복사·일시 중지/재개·삭제를 지원합니다. 방문자는 저장한 목적지로 **302 이동**하며 주소창도 바뀝니다. 목적지 자체의 경로·쿼리·fragment는 유지하되, 방문 요청의 경로·쿼리·쿠키·인증 정보는 전달하지 않습니다. 비활성·미등록·계정 정지·한도 초과 주소는 연결되지 않습니다. 서버가 목적지 내용을 가져오는 프록시 기능이나 임의 DNS 레코드 편집 기능은 아닙니다.
+
+운영에서는 PostgreSQL 마이그레이션과 API·대시보드 이미지 배포가 필요합니다. 기존 설정에 [`examples/domain-rentals.values.yaml`](examples/domain-rentals.values.yaml)을 병합하여 `domainRentals.enabled: true`와 wildcard TLS Secret을 설정하고, `*.raibit.kr`의 DNS/Cloudflare Tunnel을 Ingress Controller로 연결합니다. exact host 및 `apps--`·`preview--`·`console--`·`resources--` 서비스 라우트를 먼저 처리해야 합니다. **부모 도메인 세션 쿠키는 사용하지 않으며**, 예약 이름과 운영용 host를 제외해야 합니다. 자세한 라우팅·인증·테스트 절차는 [도메인 대여 운영 가이드](docs/domain-rentals.md)를 따릅니다. 기본적으로 wildcard 공개 라우팅은 비활성입니다.
 
 ### 4. production 환경 변수 예시
 

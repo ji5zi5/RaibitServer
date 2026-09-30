@@ -9,7 +9,7 @@ export class ApiOperationError extends Error {
   readonly terminal: boolean;
   readonly permission: boolean;
   constructor(status: number, body: z.output<typeof ErrorBody>) {
-    super(`RAIBITSERVER API ${status}: ${body.message}`);
+    super(`RAIBITSERVER API ${status}: ${'message' in body ? body.message : 'code' in body ? body.code : typeof body.error === 'string' ? body.error : body.error?.code}`);
     this.status = status;
     this.body = body;
     this.permission = status === 401 || status === 403 || ('permission' in body && body.permission === true);
@@ -90,6 +90,15 @@ export function createOperationsClient(transport: OperationTransport) {
     };
   }
   return {
+    'discord-get': bind(apiOperations['discord-get']),
+    'discord-configure': bind(apiOperations['discord-configure']),
+    'discord-disable': bind(apiOperations['discord-disable']),
+    'discord-delete': bind(apiOperations['discord-delete']),
+    'discord-test': bind(apiOperations['discord-test']),
+    'discord-deliveries': bind(apiOperations['discord-deliveries']),
+    'resource-backup-policy-get': bind(apiOperations['resource-backup-policy-get']),
+    'resource-backup-policy-update': bind(apiOperations['resource-backup-policy-update']),
+    'resource-backup-runs': bind(apiOperations['resource-backup-runs']),
     'domain-rentals-list': bind(apiOperations['domain-rentals-list']),
     'domain-rentals-create': bind(apiOperations['domain-rentals-create']),
     'domain-rentals-update': bind(apiOperations['domain-rentals-update']),
@@ -127,6 +136,9 @@ export function createOperationsClient(transport: OperationTransport) {
     'project-settings-update': bind(apiOperations['project-settings-update']),
     'project-settings-delete': bind(apiOperations['project-settings-delete']),
     'projects-overview': bind(apiOperations['projects-overview']),
+    'projects-environments': bind(apiOperations['projects-environments']),
+    'projects-environments-post': bind(apiOperations['projects-environments-post']),
+    'projects-environments-delete': bind(apiOperations['projects-environments-delete']),
     'services-list': bind(apiOperations['services-list']),
     'services-create': bind(apiOperations['services-create']),
     'services-get': bind(apiOperations['services-get']),

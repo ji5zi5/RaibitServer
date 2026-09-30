@@ -22,9 +22,13 @@ test('Helm control-plane workloads keep non-root filesystem and resource hardeni
   }
 });
 
-test('orchestrator decrypts template secrets with only the API runtime encryption key', async () => {
-  const template = await fs.readFile('infra/helm/raibitserver/templates/orchestrator-deployment.yaml', 'utf8');
-  assert.match(template, /name: ENCRYPTION_KEY\s+valueFrom:\s+secretKeyRef:\s+name: \{\{ \.Values\.runtimeSecrets\.existingSecret \| quote \}\}\s+key: ENCRYPTION_KEY/);
+test('orchestrator decrypts active template secrets with only the canonical API runtime encryption key', async () => {
+  const [template, liveFixture] = await Promise.all([
+    fs.readFile('infra/helm/raibitserver/templates/orchestrator-deployment.yaml', 'utf8'),
+    fs.readFile('scripts/live-helm-e2e.sh', 'utf8'),
+  ]);
+  assert.match(template, /if \.Values\.operational\.enabled \}\}\s+- name: RAIBITSERVER_SECRET_ENCRYPTION_KEY\s+valueFrom:\s+secretKeyRef:\s+name: \{\{ \.Values\.runtimeSecrets\.existingSecret \| quote \}\}\s+key: RAIBITSERVER_SECRET_ENCRYPTION_KEY\s+\{\{- end \}\}/);
+  assert.match(liveFixture, /--from-literal="RAIBITSERVER_SECRET_ENCRYPTION_KEY=/);
   assert.doesNotMatch(template, /envFrom:/, 'the orchestrator must not receive unrelated API runtime credentials');
 });
 

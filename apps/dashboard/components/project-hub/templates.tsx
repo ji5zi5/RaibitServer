@@ -62,6 +62,7 @@ async function templateRequest<T>(path: string, schema: { parse(value: unknown):
 }
 
 export function TemplatesView({ base, projectId, deletionPending, catalog, environments, installations: initialInstallations, installationsLoaded }: Props) {
+  const [hydrated, setHydrated] = useState(false);
   const [environmentId, setEnvironmentId] = useState(environments.find((environment) => environment.kind === 'prod')?.id || '');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState<TemplatePreflightResponse | null>(null);
@@ -79,7 +80,7 @@ export function TemplatesView({ base, projectId, deletionPending, catalog, envir
   const retryKeys = useRef(new Map<string, { version: number; key: string }>());
   const selected = catalog?.starters.find((starter) => starter.id === selectedId);
   const environment = environments.find((candidate) => candidate.id === environmentId);
-  const enabled = catalog?.availability.enabled === true && !deletionPending && Boolean(environment);
+  const enabled = hydrated && catalog?.availability.enabled === true && !deletionPending && Boolean(environment);
   const pending = installations.some((row) => row.progress.status === 'building' || row.progress.status === 'provisioning');
   const query = `?environmentId=${encodeURIComponent(environmentId)}`;
   const installationsPath = `/projects/${encodeURIComponent(projectId)}/template-installations`;
@@ -112,6 +113,8 @@ export function TemplatesView({ base, projectId, deletionPending, catalog, envir
     return () => clearInterval(timer);
   }, [pending, reload]);
   useEffect(() => {
+    // Native controls must wait for their handlers before accepting an environment choice.
+    setHydrated(true);
     const clear = () => { form.current?.reset(); installKey.current = null; };
     window.addEventListener('pagehide', clear);
     return () => { window.removeEventListener('pagehide', clear); clear(); mutation.current?.abort(); };
@@ -192,7 +195,7 @@ export function TemplatesView({ base, projectId, deletionPending, catalog, envir
     {!catalog ? <HubEmpty title="템플릿 목록을 불러오지 못했습니다." description="페이지를 새로고침하여 다시 시도하세요." /> : null}
     {catalog && !catalog.availability.enabled ? <Alert><AlertTitle>템플릿 설치 준비 중</AlertTitle><AlertDescription>{errors.TEMPLATE_UNAVAILABLE}</AlertDescription></Alert> : null}
     {deletionPending ? <Alert><AlertTitle>프로젝트 삭제 진행 중</AlertTitle><AlertDescription>삭제 중인 프로젝트에는 템플릿을 설치할 수 없습니다.</AlertDescription></Alert> : null}
-    <FieldGroup><Field data-disabled={environments.length === 0 || undefined}><FieldLabel htmlFor="template-environment">설치 환경</FieldLabel><Select id="template-environment" value={environmentId} disabled={environments.length === 0} onChange={(event) => {
+    <FieldGroup><Field data-disabled={!hydrated || environments.length === 0 || undefined}><FieldLabel htmlFor="template-environment">설치 환경</FieldLabel><Select id="template-environment" value={environmentId} disabled={!hydrated || environments.length === 0} onChange={(event) => {
       clearSelection(); setEnvironmentId(event.target.value); setInstallations([]); setLoaded(false); setListError(null);
     }}>{environments.length === 0 ? <option value="">사용 가능한 환경 없음</option> : null}{environments.map((candidate) => <option value={candidate.id} key={candidate.id}>{candidate.kind === 'prod' ? '운영 (prod)' : '개발 (dev)'}</option>)}</Select><FieldDescription>이미 존재하는 환경에 설치합니다. 서비스와 리소스는 선택한 환경에 함께 생성됩니다.</FieldDescription></Field></FieldGroup>
     <div className="grid min-w-0 gap-raibit-lg md:grid-cols-3">
@@ -216,7 +219,7 @@ export function TemplatesView({ base, projectId, deletionPending, catalog, envir
       </form>
     </Card> : null}
     <section aria-labelledby="template-installations-title" className="flex min-w-0 flex-col gap-raibit-lg">
-      <div className="flex flex-wrap items-center justify-between gap-raibit-md"><h2 id="template-installations-title" className="text-heading-lg">설치 내역</h2><Button variant="outline" disabled={refreshing || !environmentId} onClick={() => void reload()}>{refreshing ? <Spinner data-icon="inline-start" /> : null}설치 상태 새로고침</Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-raibit-md"><h2 id="template-installations-title" className="text-heading-lg">설치 내역</h2><Button variant="outline" disabled={!hydrated || refreshing || !environmentId} onClick={() => void reload()}>{refreshing ? <Spinner data-icon="inline-start" /> : null}설치 상태 새로고침</Button></div>
       {listError ? <Alert variant="destructive" aria-live="polite"><AlertTitle>설치 상태 확인 필요</AlertTitle><AlertDescription>{listError}</AlertDescription></Alert> : null}
       {!loaded && !listError && environmentId ? <p role="status" className="text-muted-foreground">설치 내역을 확인하고 있습니다.</p> : null}
       {loaded && installations.length === 0 ? <HubEmpty title="이 환경에 설치한 템플릿이 없습니다." description="위에서 템플릿을 선택해 첫 구성을 설치하세요." /> : null}

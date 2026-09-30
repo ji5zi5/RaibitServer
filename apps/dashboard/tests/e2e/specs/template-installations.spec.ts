@@ -13,6 +13,33 @@ test.describe('@template-installations', () => {
     expect((await request.post(`${FIXTURE_ORIGIN}/__fixture/reset`)).ok()).toBe(true);
   });
 
+  test('server-rendered controls wait for hydration before accepting an environment choice', async ({ adminPage }) => {
+    let releaseScripts!: () => void;
+    const scriptsReady = new Promise<void>((resolve) => { releaseScripts = resolve; });
+    await adminPage.route('**/_next/static/**', async (route) => {
+      if (route.request().resourceType() === 'script') await scriptsReady;
+      await route.continue();
+    });
+    const environment = adminPage.getByLabel('설치 환경');
+    try {
+      await adminPage.goto(path, { waitUntil: 'commit' });
+      await expect(environment).toBeVisible();
+      await expect(environment).toBeDisabled();
+      const starters = adminPage.getByRole('button', { name: /^설치 준비/ });
+      await expect(starters).toHaveCount(3);
+      for (const starter of await starters.all()) await expect(starter).toBeDisabled();
+      await expect(adminPage.getByRole('button', { name: '설치 상태 새로고침' })).toBeDisabled();
+    } finally {
+      releaseScripts();
+    }
+    await environment.selectOption('env_fixture_dev');
+    await adminPage.getByTestId('template-card-fastapi').getByRole('button', { name: '설치 준비' }).click();
+    const response = adminPage.waitForResponse((entry) => new URL(entry.url()).pathname === `${installationsPath}/preflight` && entry.request().method() === 'POST');
+    await adminPage.getByRole('button', { name: '구성 확인', exact: true }).click();
+    expect(new URL((await response).url()).searchParams.get('environmentId')).toBe('env_fixture_dev');
+    await expect(environment).toHaveValue('env_fixture_dev');
+  });
+
   test('all three starter cards are labelled, accessible, and fit mobile and desktop', async ({ adminPage }, testInfo) => {
     for (const viewport of [{ width: 375, height: 812 }, { width: 1280, height: 800 }]) {
       await adminPage.setViewportSize(viewport);

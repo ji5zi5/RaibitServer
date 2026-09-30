@@ -68,11 +68,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.existingSecret | quote }}
                   key: {{ .Values.database.urlKey | quote }}
-            - name: ENCRYPTION_KEY
+            {{- if .Values.operational.enabled }}
+            - name: RAIBITSERVER_SECRET_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.runtimeSecrets.existingSecret | quote }}
-                  key: ENCRYPTION_KEY
+                  key: RAIBITSERVER_SECRET_ENCRYPTION_KEY
+            {{- end }}
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 500m, memory: 512Mi }

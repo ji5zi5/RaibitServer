@@ -60,6 +60,19 @@ function assertWorkloadEnvironment(result, expected) {
     assert.ok(deployment, `missing trusted ${component} Deployment`);
     const container = deployment.spec.template.spec.containers.find((entry) => entry.name === component);
     assert.ok(container, `missing ${component} container`);
+    if (component === 'orchestrator') {
+      const key = container.env.find((entry) => entry.name === 'RAIBITSERVER_SECRET_ENCRYPTION_KEY');
+      if (expected.RAIBITSERVER_OPERATIONAL_FEATURES_ENABLED === '1') {
+        const api = documents.find((document) => document.kind === 'Deployment' && document.metadata?.name === 'raibitserver-api');
+        const sharedSecret = api.spec.template.spec.containers[0].envFrom.find((entry) => entry.secretRef).secretRef.name;
+        assert.deepEqual(key?.valueFrom, { secretKeyRef: { name: sharedSecret, key: 'RAIBITSERVER_SECRET_ENCRYPTION_KEY' } },
+          'active template runtime requires the canonical API key without optional fallback');
+      } else {
+        assert.equal(key, undefined, 'disabled template runtime must not require an encryption key to start');
+      }
+      assert.equal(container.env.some((entry) => entry.name === 'ENCRYPTION_KEY'), false,
+        'the chart must not reference the legacy key absent from the shared runtime Secret');
+    }
     const entries = container.env.filter((entry) => Object.hasOwn(expected, entry.name));
     assert.equal(entries.length, 6, `${component} must receive each operational variable exactly once`);
     const environment = Object.fromEntries(entries.map(({ name, value }) => [name, value]));

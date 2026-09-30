@@ -556,7 +556,7 @@ test('deployment detail awaits route params and keeps operational controls on a 
   assert.match(deployment, /className="log-viewer[^\"]*focus-visible:outline-none[^\"]*focus-visible:ring-3/);
   assert.match(deployment, /text-inverse-foreground/);
   assert.match(deployment, /font-mono\s+text-xs/);
-  assert.match(deployment, /break-all\s+whitespace-pre-wrap/);
+  assert.match(deployment, /break-keep\s+whitespace-pre-wrap\s+\[overflow-wrap:anywhere\]/);
   assert.match(deployment, /<DeploymentStream rows=\{logs\.body\?\.logs \|\| \[\]\} field="line" label="마스킹된 빌드 로그"/);
   assert.match(deployment, /<DeploymentStream rows=\{events\.body\?\.events \|\| \[\]\} field="message" label="배포 이벤트 기록"/);
   assert.doesNotMatch(deployment, /<LogViewer\b/);

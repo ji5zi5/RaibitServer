@@ -99,7 +99,7 @@ test.describe('@template-installations', () => {
     const conflict = await previewResponse;
     expect(conflict.status()).toBe(409);
     expect(await conflict.json()).toMatchObject({ error: 'TEMPLATE_SLUG_CONFLICT' });
-    await expect(adminPage.getByRole('alert')).toBeVisible();
+    await expect(adminPage.getByRole('alert').filter({ hasText: '같은 환경에 동일한 이름' })).toBeVisible();
     await expect(adminPage.getByRole('button', { name: '설치 및 배포', exact: true })).toHaveCount(0);
     expect(installs).toEqual([]);
 
@@ -116,7 +116,12 @@ test.describe('@template-installations', () => {
     await adminPage.route(`**${installationsPath}?*`, async (route) => {
       if (route.request().method() !== 'POST') return route.continue();
       bodies.push(route.request().postDataJSON());
-      if (bodies.length <= 2) expect((await route.fetch()).status()).toBe(202);
+      if (bodies.length <= 2) {
+        const target = new URL(route.request().url());
+        const host = target.host;
+        target.hostname = '127.0.0.1';
+        expect((await route.fetch({ url: target.href, headers: { ...await route.request().allHeaders(), host } })).status()).toBe(202);
+      }
       return route.abort('failed');
     });
     await adminPage.goto(path);
@@ -126,15 +131,19 @@ test.describe('@template-installations', () => {
     const install = adminPage.getByRole('button', { name: '설치 및 배포', exact: true });
     await expect(install).toBeEnabled();
     await install.click();
-    await expect(adminPage.getByRole('alert')).toBeVisible();
+    await expect(adminPage.getByRole('alert').filter({ hasText: '요청 결과를 확인하지 못했습니다.' })).toBeVisible();
     await expect(install).toBeEnabled();
     await install.click();
     await expect.poll(() => bodies.length).toBe(2);
     await expect(install).toBeEnabled();
     expect(bodies[0].requestIdempotencyKey).toBe(bodies[1].requestIdempotencyKey);
     expect(bodies[0]).toEqual(bodies[1]);
-    const persisted = await adminPage.request.get(new URL(`${installationsPath}?environmentId=env_fixture_prod`, adminPage.url()).href);
-    expect((await persisted.json()).installations).toHaveLength(1);
+    const persisted = await adminPage.evaluate(async (url) => {
+      const response = await fetch(url);
+      return { status: response.status, body: await response.json() };
+    }, `${installationsPath}?environmentId=env_fixture_prod`);
+    expect(persisted.status).toBe(200);
+    expect(persisted.body.installations).toHaveLength(1);
 
     await adminPage.getByLabel('DISCORD_TOKEN', { exact: true }).fill('fixture-discord-edited');
     await expect(install).toHaveCount(0);

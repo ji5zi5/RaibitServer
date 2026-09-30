@@ -27,6 +27,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./domain-router": "./src/domain-router.ts",
+    "./domain-rentals": "./src/domain-rentals.ts",
+    "./domain-rentals-http": "./src/domain-rentals-http.ts",
+    "./domain-rentals-postgres": "./src/domain-rentals-postgres.ts",
     "./execution": "./src/execution.ts",
     "./oauth-source": "./src/oauth-source.ts"
   },

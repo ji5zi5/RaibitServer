@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createSessionToken, hashPasswordAsync, normalizeEmail, personalOrganizationSlug, sessionTtlSeconds, signupPolicyForAccount } from './identity.ts';
 import { parseOrganizationRouteSlug } from './rbac.ts';
+import { EMAIL_VERIFICATION_CONTACT_EMAIL, EMAIL_VERIFICATION_ORGANIZATION, EMAIL_VERIFICATION_SITE_URL, renderEmailVerificationHtml } from './email-verification-template.ts';
 
 export const DEFAULT_EMAIL_VERIFICATION_TTL_SECONDS = 10 * 60;
 export const MAX_EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
@@ -85,12 +86,17 @@ export function buildEmailVerificationMessage(input: { email: string; code: stri
     '',
     `이 코드는 약 ${minutes}분 후 만료됩니다.`,
     '본인이 요청하지 않았다면 이 메일을 무시하세요.',
+    '',
+    EMAIL_VERIFICATION_ORGANIZATION,
+    `사이트: ${EMAIL_VERIFICATION_SITE_URL}`,
+    `문의 이메일: ${EMAIL_VERIFICATION_CONTACT_EMAIL}`,
   ].join('\n');
   return {
     from: input.from ? sanitizeEmailSenderHeader(input.from) : emailVerificationSenderFromEnv(input.env || process.env),
     to: normalizeEmail(input.email),
     subject,
     text,
+    html: renderEmailVerificationHtml({ appName, code: input.code, minutes }),
   };
 }
 

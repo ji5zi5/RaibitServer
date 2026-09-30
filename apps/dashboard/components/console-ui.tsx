@@ -22,7 +22,7 @@ type JsonCardProps = {
   value: any;
 };
 
-type NavItemId = 'overview' | 'projects' | 'create-project' | 'github' | 'guide' | 'admin' | 'account';
+type NavItemId = 'overview' | 'projects' | 'create-project' | 'github' | 'guide' | 'admin' | 'account' | 'domains';
 
 type ShellProps = {
   children: ReactNode;
@@ -84,6 +84,7 @@ export async function ConsoleShell({
     { id: 'projects', label: '프로젝트', href: organizationLinks.projects, icon: 'folder' },
     { id: 'create-project', label: '프로젝트 만들기', href: organizationLinks.createProject, icon: 'plus' },
     { id: 'github', label: 'GitHub 연결', href: '/github', icon: 'arrow-top-right-on-square' },
+    { id: 'domains', label: '도메인 대여', href: '/account/domains', icon: 'arrow-top-right-on-square' },
     { id: 'guide', label: '사용 안내', href: '/guide', icon: 'command-line' },
     ...(isAdmin ? [{ id: 'admin' as const, label: '관리자', href: '/admin', icon: 'user-group' as IconName }] : []),
   ];

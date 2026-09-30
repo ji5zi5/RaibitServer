@@ -4,6 +4,8 @@ import { projectObservationPayload } from '@raibitserver/core';
 import { ProjectSettingsError } from '@raibitserver/core';
 import { PasswordRecoveryCompleteSchema, PasswordRecoveryRequestSchema, ResourceBackupListSchema, type CustomDomainCreate, type CustomDomainMutation, type CustomDomainRotate, type ProjectDeletionScheduled, type ProjectSettingsUpdate, type ProjectSettingsView, type ResourceBackupCreate, type ResourceBackupDelete, type ResourceBackupList, type ResourceRestoreCreate, type ProjectSpec, type ServiceReplacementInput, type ServiceSettingsMutation, type ServiceSpec, type ResourceSpec } from '@raibitserver/schemas';
 import type { IncomingMessage } from 'node:http';
+import { MemoryDomainRentalRepository } from '@raibitserver/core/domain-rentals';
+import { normalizeCustomHostname } from '@raibitserver/core';
 import { consumeGitHubOAuthIdentity, startGitHubOAuth, oauthAttempt, OAuthPublicError } from '@raibitserver/core';
 import { assertCurrentSession, assertEnvironmentWriteAllowed, assertSystemDeploymentActor, authorizeSubject, completePasswordRecovery, createControlPlaneRepository, createGitHubAppAuthorizationPlan, createGitHubAppAuthorizationRetryPlan, createGitHubAppInstallationPlan, createSessionToken, enforceAuthAbuseLimits, issueSignupEmailVerificationCode, keysetCursorForRows, normalizeEmail, normalizeEnvEntries, organizationScopeFromProjectInput, parseDotEnv, publicSitesFromSnapshot, quotaUsageGauges, quotaWarnings, requestPasswordRecovery, requireScope, resendEmailVerificationCode, resolveGitHubAppInstallationSelection, sanitizeDeploymentStatusInput, sanitizeTenantDeploymentCreate, sanitizeTenantResourceApiInput, sanitizeTenantResourceApiUpdate, sanitizeTenantServiceInput, sanitizeTenantServiceUpdate, shouldPromoteFirstLogin, validateServiceSecurity, verifyEmailCodeAndCreateSession, verifyGitHubAppInstallationState, verifyPasswordAsync, type InMemoryControlPlaneRepository, type PrismaControlPlaneRepository } from '@raibitserver/core';
 import { RecoveryError, ResourceCapabilityUnavailable, ResourceIntentInvalid, publicRecovery, resourceAvailability, resourceStorageMb, can, listCatalog } from '@raibitserver/core';
@@ -33,6 +35,7 @@ type PasswordResetContext = Readonly<{ request?: IncomingMessage; response?: imp
 @Injectable()
 export class RAIBITSERVERService implements OnModuleDestroy {
   private readonly repositoryPromise: Promise<InMemoryControlPlaneRepository | PrismaControlPlaneRepository>;
+  private rentalMemoryRepository?: Promise<MemoryDomainRentalRepository>;
 
   constructor() {
     this.repositoryPromise = createControlPlaneRepository();
@@ -376,6 +379,18 @@ export class RAIBITSERVERService implements OnModuleDestroy {
     return { deleted: true, serviceId: service.id || serviceId };
   }
 
+  /** Internal memory adapter shared by rentals and custom-domain mutations. */
+  domainRentalMemoryRepository(): Promise<MemoryDomainRentalRepository> {
+    return this.rentalMemoryRepository ??= this.repositoryPromise.then((repository) => {
+      if (!('store' in repository)) throw new Error('domain_rental_memory_repository_unavailable');
+      return new MemoryDomainRentalRepository(
+        async (id) => repository.store.findUserById(id),
+        async (hostname) => [...repository.store.domains.values()].some((domain) =>
+          String(domain.hostname || domain.domain || '').toLowerCase().replace(/\.$/, '') === hostname),
+      );
+    });
+  }
+
   async listDomains(projectId: string, subject: Record<string, unknown>) {
     const repository = await this.repositoryPromise;
     await assertProjectAccess(repository, projectId, subject);
@@ -387,10 +402,22 @@ export class RAIBITSERVERService implements OnModuleDestroy {
     await assertProjectAccess(repository, projectId, subject);
     const project = await repository.getProject(projectId);
     try {
-      return await repository.createCustomDomain({
-        ...input, organizationId: project.organizationId, projectId, actorUserId: subject.id,
-        platformZones: [process.env.RAIBITSERVER_BASE_DOMAIN || 'raibitserver.app'],
+      const platformZones = [process.env.RAIBITSERVER_BASE_DOMAIN || 'raibitserver.app'];
+      const create = () => repository.createCustomDomain({
+        ...input, organizationId: project.organizationId, projectId, actorUserId: subject.id, platformZones,
       });
+      if ('store' in repository) {
+        // Use the rental adapter's queue in both directions, including concurrent
+        // claims. Production enforces the same invariant with database triggers.
+        const rentals = await this.domainRentalMemoryRepository();
+        return await rentals.withOwner(String(subject.id), async (tx) => {
+          if (await tx.findHostname(normalizeCustomHostname(input.hostname, platformZones))) {
+            throw new DomainLifecycleError('DOMAIN_HOSTNAME_CONFLICT', 409);
+          }
+          return create();
+        });
+      }
+      return await create();
     } catch (error) {
       throw nestDomainError(error);
     }

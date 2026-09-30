@@ -1,5 +1,8 @@
 {
   "wireBodies": {
+    "domain-rentals-create": {"name":"parity-rental","targetUrl":"https://example.org/docs?x=1#intro"},
+    "domain-rentals-update": {"expectedVersion":1,"enabled":false},
+    "domain-rentals-delete": {"expectedVersion":2},
     "deployments-retry": {"requestIdempotencyKey":"parity-retry","snapshotVersion":1},
     "services-redeploy": {"requestIdempotencyKey":"parity-redeploy","snapshotVersion":1},
     "services-settings-preview": {"expectedUpdatedAt":"2026-09-06T00:00:00.000Z","changes":{"branch":"main"}},
@@ -72,6 +75,10 @@
     {"operation":"auth-github-login","method":"GET","path":"/auth/github/login","status":400,"public":true},
     {"operation":"auth-github-callback","method":"GET","path":"/auth/github/callback","status":400,"public":true},
     {"operation":"auth-login","method":"POST","path":"/auth/login","body":{"email":"parity@example.test","password":"test-password"},"status":201,"public":true,"saveToken":true},
+    {"operation":"domain-rentals-list","method":"GET","path":"/domain-rentals","status":200},
+    {"operation":"domain-rentals-create","method":"POST","path":"/domain-rentals","body":{"name":"parity-rental","targetUrl":"https://example.org/docs?x=1#intro"},"status":201,"save":"rentalId"},
+    {"operation":"domain-rentals-update","method":"POST","path":"/domain-rentals/{rentalId}/update","body":{"expectedVersion":1,"enabled":false},"status":200},
+    {"operation":"domain-rentals-delete","method":"POST","path":"/domain-rentals/{rentalId}/delete","body":{"expectedVersion":2},"status":200},
     {"operation":"auth-me","method":"GET","path":"/auth/me","status":200},
     {"operation":"projects-create","method":"POST","path":"/projects","body":{"name":"Parity"},"status":201,"save":"projectId"},
     {"operation":"projects-list","method":"GET","path":"/projects?limit=1","status":200},

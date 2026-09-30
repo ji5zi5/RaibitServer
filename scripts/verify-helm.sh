@@ -357,3 +357,6 @@ expect_render_failure invalid-storage-bound --set-string builder.ephemeralStorag
 
 sh "$ROOT_DIR/scripts/verify-provisioner-admission.sh" "$OUTPUT_DIR/default.yaml" "$OUTPUT_DIR/production.yaml"
 echo "Helm default/production renders, production fail-closed cases, and provisioner CEL boundary passed"
+
+# The old installed updater must be able to introduce rentals with old values.
+node "$ROOT_DIR/scripts/check-domain-rentals-helm.mjs" "$HELM"

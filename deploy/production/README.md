@@ -82,6 +82,14 @@ done
 
 Disposable local cluster smoke test가 필요하면 [Live E2E](../../docs/live-e2e.md)를 실행합니다.
 
+## 도메인 대여의 무인 자동 적용
+
+기존 production Traefik 서버는 도메인 대여가 포함된 `main`의 CI가 성공한 뒤 평소의 자동 업데이트만 실행되면 됩니다. `production-values.yaml` 변경이나 timer 재설치가 필요하지 않습니다. 이전 updater도 새 chart의 migration → 배포 → 점검 hook을 실행하므로 최초 업데이트부터 처리됩니다.
+
+새 chart의 `domainRentals.enabled: auto`는 기존 wildcard host, TLS Secret, entrypoints를 재사용합니다. 명시적인 `false`는 유지합니다. DB 변경은 기존 pre-upgrade migration Job이 맡고, 읽기 전용 post-upgrade Job이 대여 테이블·보호 트리거·API를 확인한 뒤에만 Helm 성공으로 넘어갑니다. 실패 시 기존 rollback 보호를 유지하며 추가된 DB 데이터는 삭제하지 않습니다.
+
+기존 `*.raibit.kr` DNS/Tunnel 규칙과 Host 보존을 전제로 합니다. updater가 Cloudflare DNS나 Tunnel을 임의 변경하거나 새 계정 토큰을 요구하지 않습니다. [도메인 대여 운영 가이드](../../docs/domain-rentals.md)에 적용 조건과 검증 범위를 설명했습니다.
+
 ## Cloudflare Tunnel edge 배포
 
 Cloudflare Tunnel을 production ingress 앞단으로 사용할 수 있지만, Tunnel은 HTTP/HTTPS edge 진입점으로만 둡니다.

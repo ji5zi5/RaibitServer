@@ -10,6 +10,8 @@ export const digest = (content) => createHash('sha256').update(content.replaceAl
 export const migrationSetDigest = (entries) => digest(`${entries.map((entry) => `${entry.id}:${entry.sha256}`).join('\n')}\n`);
 const reviewedTriggerMigrations = new Set(['000014_resource_recovery', '000015_preview_lineage']);
 const reviewedCompatibilityContracts = new Map([
+  // Exact reviewed DDL for rental/custom-domain cross-namespace uniqueness.
+  ['202609291300_domain_rentals', '509883b50204ea67ec011ff2da29a3ae2460b0ff4e59798dbb5581abfa3f6e15'],
   ['000017_github_integration_lifecycle', 'c470f59cd7902fc70306d75d31a230b4c6159d9030147329c66b329324157198'],
   ['000017_organization_invites', '065527eaa28391ce49cdf3e0a3467e1c4220f61783385f9476f337d0252f630b'],
   ['000018_github_catalog_generation', 'fc72c579048e9f186ca44992289ad66eae44823a1cda38fcb8f0c253a75b1978'],

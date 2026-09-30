@@ -14,6 +14,7 @@ import { ServicesModule } from './modules/services/services.module';
 import { UsageModule } from './modules/usage.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { DomainsModule } from './modules/domains/domains.module';
+import { DomainRentalsModule } from './modules/domain-rentals/domain-rentals.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { DomainsModule } from './modules/domains/domains.module';
     UsageModule,
     OrganizationsModule,
     DomainsModule,
+    DomainRentalsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: RbacGuard }],
 })

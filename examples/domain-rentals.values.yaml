@@ -1,0 +1,13 @@
+# OPTIONAL overrides; existing production Traefik auto-updates need no overlay.
+# Reuse the existing wildcard DNS/Tunnel with its actual Host preserved.
+domainRentals:
+  # auto enables existing production Traefik installs; false explicitly opts out.
+  # Use true only when explicitly configuring another ingress/base domain.
+  enabled: auto
+  # Empty reuses hostedErrors.fallbackIngress.host / ingress.hosts.public.
+  baseDomain: ""
+  # Empty reuses the wildcard fallback Secret, then ingress.tls.existingSecret.
+  tlsSecret: ""
+  # Additional names used outside this Helm release; platform names are reserved.
+  reservedNames: ""
+  annotations: {}

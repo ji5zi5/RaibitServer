@@ -243,7 +243,17 @@ Tenant NetworkPolicy는 임의의 사용자 라벨이 아니라 Kubernetes 예�
 
 존재하지 않는 tenant hostname과 upstream 5xx는 공통 오류 backend로 전달할 수 있습니다. `hostedErrors.fallbackIngress.tls.existingSecret`을 비우면 기존 `ingress.tls.existingSecret`을 재사용합니다. 선택된 Secret에는 wildcard 인증서가 있어야 하며, 사용 중인 ingress-nginx 또는 Traefik 연결은 [호스팅 오류 화면 가이드](docs/hosted-error-pages.md)대로 설정하세요.
 
-> 보안 필수: `raibit.kr`의 랜딩과 `/public/sites`만 공개합니다. 로그인·가입·콘솔 경로는 `console.raibit.kr`로 이동하며 세션 쿠키는 host-only로 유지합니다. 부모 도메인 쿠키는 `apps--*.raibit.kr` 사용자 워크로드에도 bearer token을 보내므로 사용하지 않습니다. `/admin`과 관리자 메뉴는 JWT의 `userRole=ADMIN`인 계정만 사용할 수 있으며 Cloudflare Access/MFA를 추가 방어선으로 둘 수 있습니다.
+> 보안 필수: `raibit.kr`의 랜딩과 `/public/sites`는 공개합니다. 도메인 대여를 활성화하면 `*.raibit.kr` 중 대여된 주소의 **GET/HEAD 리다이렉트도 익명 공개**됩니다. 대여 관리 화면(`/account/domains`)과 `/api/domain-rentals` 관리 API는 로그인·승인·소유자 확인이 필요합니다. 로그인·가입·콘솔 경로는 `console.raibit.kr`로 이동하며 세션 쿠키는 host-only로 유지합니다. 부모 도메인 쿠키는 `apps--*.raibit.kr` 사용자 워크로드에도 bearer token을 보내므로 사용하지 않습니다. `/admin`과 관리자 메뉴는 JWT의 `userRole=ADMIN`인 계정만 사용할 수 있으며 Cloudflare Access/MFA를 추가 방어선으로 둘 수 있습니다.
+
+### 도메인만 대여하기
+
+콘솔의 **도메인 대여** 메뉴(데스크톱 사이드바·모바일 메뉴·검색·계정 메뉴)에서 서버나 프로젝트 없이 `이름.raibit.kr`을 만들고 외부 HTTP(S) 주소로 연결할 수 있습니다. **동아리원 5개, 비동아리원 2개**이며 조직별이 아닌 계정 전체 한도입니다. 일시 중지한 주소도 한도에 포함됩니다. 이름은 영문·숫자·하이픈 **1~63자**(첫 글자와 끝 글자는 영문·숫자)이며, 운영용 이름과 기존 서비스·대여 주소는 사용할 수 없습니다.
+
+화면에서 생성·이름/목적지 수정·복사·일시 중지/재개·삭제를 지원합니다. 방문자는 저장한 목적지로 **302 이동**하며 주소창도 바뀝니다. 목적지 자체의 경로·쿼리·fragment는 유지하되, 방문 요청의 경로·쿼리·쿠키·인증 정보는 전달하지 않습니다. 비활성·미등록·계정 정지·한도 초과 주소는 연결되지 않습니다. 서버가 목적지 내용을 가져오는 프록시 기능이나 임의 DNS 레코드 편집 기능은 아닙니다.
+
+기존 **production Traefik + 자동 업데이트** 설치에서는 이 변경을 포함한 `main`의 CI가 통과한 뒤 정상 업데이트만으로 기능이 들어옵니다. `production-values.yaml` 수정, timer 재설치, 별도 마이그레이션 명령이 필요하지 않습니다. 새 chart는 `domainRentals.enabled: auto`를 기본으로 기존 wildcard 도메인·TLS Secret·gateway 설정을 재사용합니다. 기존 `pre-upgrade` Job이 DB를 먼저 변경하고, 새 API·대시보드 배포 뒤 읽기 전용 `post-upgrade` Job이 테이블·충돌 방지 트리거·인증 경계·Host 리다이렉트 처리를 확인합니다. 이 점검이 실패하면 업데이트는 실패하며 기존 Helm rollback 보호가 적용됩니다. DB에 추가된 테이블·대여 데이터는 rollback 때 삭제하지 않습니다.
+
+명시적인 `domainRentals.enabled: false`는 유지하며 로컬/비-Traefik 기본 설치에는 wildcard 경로를 자동 생성하지 않습니다. 이미 동작하는 `*.raibit.kr` DNS/Cloudflare Tunnel과 Host 헤더를 그대로 사용하므로 별도 DNS 권한이나 새 토큰을 요구하지 않습니다. 아직 wildcard가 없는 설치나 별도 base domain은 자동 생성 대상이 아닙니다. exact host 및 기존 서비스 경로 우선순위와 **host-only 세션 쿠키**를 유지합니다. 선택적 운영 설정은 [`examples/domain-rentals.values.yaml`](examples/domain-rentals.values.yaml), 상세한 동작과 검증 범위는 [도메인 대여 운영 가이드](docs/domain-rentals.md)에 있습니다.
 
 ### 4. production 환경 변수 예시
 
@@ -327,6 +337,7 @@ private 저장소 빌드용 App ID와 RSA private key는 API 환경변수에 넣
 - 가입 신청은 이메일/비밀번호와 함께 이름·학번을 필수로 저장합니다. 관리자는 승인 화면에서 이름/학번/이메일을 확인하고 `CLUB_MEMBER` 또는 `NON_CLUB`으로 승인합니다.
 - 운영 첫 admin은 더 이상 “첫 가입자”만으로 자동 승격되지 않습니다. `ADMIN_EMAILS`에 포함된 이메일이 `RAIBITSERVER_ADMIN_BOOTSTRAP_TOKEN`을 함께 제출할 때만 admin bootstrap이 허용됩니다.
 - 이메일/비밀번호 signup은 6자리 이메일 인증 코드를 먼저 발송하고, `/auth/email/verify` 성공 후에만 세션 토큰을 발급합니다. 같은 이메일로 signup을 다시 시작하면 이전에 소비되지 않은 signup 인증 코드와 payload를 무효화하고 새 payload/코드를 발급해, 악의적이거나 오래된 pending signup이 정상 가입을 계속 막거나 피해자가 공격자 지정 비밀번호/조직으로 계정을 만들게 하지 않습니다. `/auth/email/resend`는 아직 만료되지 않은 최신 pending signup payload에 대해서만 코드를 재발급합니다. 발신자는 발송 전용 주소(`RAIBITSERVER_EMAIL_FROM`, 예: `RAIBITSERVER <email-verification@raibitserver.app>`)이고, `RAIBITSERVER_EMAIL_DOMAIN`/`RAIBITSERVER_BASE_DOMAIN`/`BASE_DOMAIN`에서 자동 생성할 수도 있습니다. 이 기능은 사용자 메일함/MX를 운영하지 않으며 production은 `RAIBITSERVER_EMAIL_WEBHOOK_URL` 같은 실제 mail bridge와 발신 도메인의 SPF/DKIM/DMARC 설정이 필요합니다.
+- 인증 메일 웹훅 JSON에는 꾸민 본문인 `html`과 일반 텍스트 대체 본문인 `text`가 함께 들어갑니다. 메일 브리지는 `html`을 HTML 본문으로 전달해야 새 디자인이 수신자에게 표시됩니다.
 - DB console 권한은 `db:schema:read`, `db:data:read`, `db:query:write`로 분리됩니다. 기본 developer는 schema metadata만 볼 수 있고 row data `SELECT`는 maintainer/db-admin 이상 권한이 필요합니다.
 - public egress는 프로젝트 namespace 전체가 아니라 `*-public-egress` 서비스별 NetworkPolicy로만 열립니다. ingress/proxy에서는 `x-raibitserver-user`, `x-raibitserver-role`, `x-raibitserver-organization`, `x-raibitserver-project` 헤더를 외부 요청에서 제거하세요.
 - production tenant API는 local/file source와 기본 허용 목록 밖 Git host를 거부합니다. 예외가 필요하면 `RAIBITSERVER_ALLOWED_GIT_HOSTS`로 Git host를 명시하고, 로컬 source는 개발 환경에서만 사용하세요.

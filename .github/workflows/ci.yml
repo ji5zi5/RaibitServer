@@ -81,6 +81,7 @@ jobs:
       - name: Template install, reload, retry and mobile browser flows
         run: pnpm --filter @raibitserver/dashboard test:e2e tests/e2e/specs/template-installations.spec.ts
         env:
+          RAIBITSERVER_E2E_FIXTURES: '1'
           RAIBITSERVER_PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/template-browser
       - name: Upload template browser evidence
         if: failure()

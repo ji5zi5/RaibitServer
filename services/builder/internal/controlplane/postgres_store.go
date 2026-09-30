@@ -39,7 +39,7 @@ WITH exhausted AS (
     AND wj."lockedAt" IS NOT NULL
     AND wj."lockedAt" <= $3
     AND wj.attempts >= CASE WHEN wj."maxAttempts" > 0 THEN wj."maxAttempts" ELSE 3 END
-    AND EXISTS (
+    AND (EXISTS (
       SELECT 1
       FROM "Deployment" AS deployment
       JOIN "Service" AS service ON service.id = deployment."serviceId" AND service."projectId" = deployment."projectId"
@@ -49,7 +49,17 @@ WITH exhausted AS (
 		AND (COALESCE(environment.kind, 'prod') = 'prod' OR ($10 = 2 AND wj."operationalProtocolVersion" = 2))
 		AND ($10 = 1 OR binding."serviceId" IS NOT NULL)
         AND (deployment."environmentId" IS NULL OR deployment."environmentId" = binding."environmentId")
-    )
+    ) OR (
+      wj."environmentId" IS NULL
+      AND wj."operationalProtocolVersion" = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM "Deployment" AS deployment
+        WHERE deployment.id IN (
+          NULLIF(BTRIM(wj.payload ->> 'deploymentId'), ''),
+          CASE WHEN LOWER(BTRIM(wj."targetType")) = 'deployment' THEN NULLIF(BTRIM(wj."targetId"), '') END
+        )
+      )
+    ))
   ORDER BY wj."lockedAt" ASC, wj."createdAt" ASC, wj.id ASC
   FOR UPDATE SKIP LOCKED
   LIMIT $5

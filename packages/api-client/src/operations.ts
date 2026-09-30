@@ -9,7 +9,10 @@ export class ApiOperationError extends Error {
   readonly terminal: boolean;
   readonly permission: boolean;
   constructor(status: number, body: z.output<typeof ErrorBody>) {
-    super(`RAIBITSERVER API ${status}: ${'message' in body ? body.message : 'code' in body ? body.code : typeof body.error === 'string' ? body.error : body.error?.code}`);
+    const message = 'message' in body ? body.message : undefined;
+    const code = 'code' in body ? body.code : undefined;
+    const error = 'error' in body ? body.error : undefined;
+    super(`RAIBITSERVER API ${status}: ${message ?? code ?? (typeof error === 'string' ? error : error?.code)}`);
     this.status = status;
     this.body = body;
     this.permission = status === 401 || status === 403 || ('permission' in body && body.permission === true);

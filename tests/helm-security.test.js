@@ -22,6 +22,12 @@ test('Helm control-plane workloads keep non-root filesystem and resource hardeni
   }
 });
 
+test('orchestrator decrypts template secrets with only the API runtime encryption key', async () => {
+  const template = await fs.readFile('infra/helm/raibitserver/templates/orchestrator-deployment.yaml', 'utf8');
+  assert.match(template, /name: ENCRYPTION_KEY\s+valueFrom:\s+secretKeyRef:\s+name: \{\{ \.Values\.runtimeSecrets\.existingSecret \| quote \}\}\s+key: ENCRYPTION_KEY/);
+  assert.doesNotMatch(template, /envFrom:/, 'the orchestrator must not receive unrelated API runtime credentials');
+});
+
 test('tenant build executors require a dedicated rootless BuildKit node pool', async () => {
   const [builder, values] = await Promise.all([
     fs.readFile('infra/helm/raibitserver/templates/builder-deployment.yaml', 'utf8'),

@@ -11,7 +11,7 @@ import { ProjectSettingsError, projectSettingsView, scheduledProjectDeletion, ty
 import type { CreateOAuthTransactionInput, ConsumeOAuthTransactionInput, OAuthCleanupInput } from './oauth-transaction.ts';
 import { createPrismaOAuthTransaction, consumePrismaOAuthTransaction, deletePrismaOAuthTransactions } from './prisma-oauth-transaction.ts';
 import { LIFECYCLE_CONTRACT, terminalLifecycleInputs } from './lifecycle.ts';
-import { AUTH_RETENTION_PRUNE_BATCH_SIZE, ControlPlaneStore } from './store.ts';
+import { AUTH_RETENTION_PRUNE_BATCH_SIZE, ControlPlaneStore, type PersistedTemplateVersion } from './store.ts';
 import { deepClone, stableId } from './ids.ts';
 import { maskSecretValue, maskSecrets } from './secrets.ts';
 import { openSecret, sealSecret } from './secret-vault.ts';
@@ -22,13 +22,13 @@ import { completeWorkflowJobRecord, failWorkflowJobRecord, processNextWorkflowJo
 import { canonicalizeProviderDesiredSpec, providerOwnedSqlitePath, resourceNameFallback, sanitizeTenantResourceInput } from './resource-sanitizer.ts';
 import { normalizeResourceEngine } from './catalog.ts';
 import { assertNoTenantGitHubBinding, redactDbConsoleStatement, sanitizeLogRecord, sanitizeTenantServiceInput, sanitizeTenantServiceUpdate } from './security.ts';
-import { parseResourceIntent, requireResourceExecution } from './resource-execution.ts';
+import { parseResourceIntent, requireResourceExecution, resourceAvailability } from './resource-execution.ts';
 import { assertDeploymentTransition, canCancelDeployment, normalizeDeploymentStatus } from './deployments.ts';
 import { previewRuntimePlan } from './preview-deployments.ts';
 import { canonicalPreviewWebhook, parsePreviewObservation, parsePreviewWebhook, PreviewError, previewWebhookLineage, previewWebhookPayloadMatches } from './preview-contract.ts';
 import { applyPreviewObservation, assertPreviewRetry, createPreviewRuntime, PREVIEW_APPLY_JOB, PREVIEW_RESOLVER_JOB, previewCloseIntent, resolverJobId, resolverPayload, transitionPreviewLineage, type PreviewLineageRecord } from './preview-lineage.ts';
 import { normalizeAccountType } from './identity.ts';
-import { membershipRoleTransition, normalizeOrganizationRoleForRead, parseOrganizationMembershipRoleForMutation, parseOrganizationRouteSlug, type OrganizationMembershipRole } from './rbac.ts';
+import { can, membershipRoleTransition, normalizeOrganizationRoleForRead, parseOrganizationMembershipRoleForMutation, parseOrganizationRouteSlug, type OrganizationMembershipRole } from './rbac.ts';
 import { PostgresOrganizationInviteRepository } from './organization-invite-postgres.ts';
 import type { ReplaceOrganizationInviteInput } from './organization-invite.ts';
 import { PostgresMembershipTransitionRepository } from './membership-transition-postgres.ts';
@@ -65,9 +65,219 @@ import {
   utcMonthBounds,
 } from './store-helpers.ts';
 import { validateServiceRuntime, validateServiceRuntimeUpdate } from './service-runtime.ts';
+import { PersistedTemplateVersionSchema, TemplateInstallationIntentSchema } from '@raibitserver/schemas/templates';
+import { assertTemplateSecretValues, installationProgress, templateAvailability, TemplateInstallationError, type TemplateInstallationIntent, type TemplatePreflightContext } from './template-installations.ts';
 
 type QuotaRequirement = { metric: string; increment: number };
 type ObservationLogRow = Record<string, unknown>;
+
+function templateHash(value: unknown): string { return githubMutationHash({ value }); }
+function assertTemplateAdmission() {
+  if (!templateAvailability().enabled) throw new TemplateInstallationError('TEMPLATE_UNAVAILABLE', 409);
+}
+function templateActor(store: ControlPlaneStore, projectId: string, actorUserId: string, write = true) {
+  const project = store.projects.get(projectId);
+  const actor = store.users.get(actorUserId);
+  const member = store.members.find(row => row.organizationId === project?.organizationId && row.userId === actorUserId);
+  if (!project || !member || isDeleting(project)) throw new TemplateInstallationError('TEMPLATE_NOT_FOUND', 404);
+  if (!actor || actor.approvalStatus !== 'APPROVED' || isActiveBan(actor) || !can(member.role, write ? 'deploy:run' : 'project:read')) throw new TemplateInstallationError('TEMPLATE_FORBIDDEN', 403);
+}
+function memoryTemplateContext(store: ControlPlaneStore, projectId: string, selector: Readonly<Record<string, unknown>>, key: string, actorUserId: string): TemplatePreflightContext {
+  templateActor(store, projectId, actorUserId);
+  const environment = store.resolveEnvironment(projectId, selector);
+  const replay = [...store.templateInstallations.values()].find(row => row.projectId === projectId && row.requestIdempotencyKey === key);
+  if (replay && replay.environmentId !== environment.id) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  const serviceIds = new Set(replay?.services.map(row => row.id) ?? []);
+  const resourceIds = new Set(replay?.resources.map(row => row.id) ?? []);
+  const actor = store.users.get(actorUserId);
+  const quota = [...store.quotas.values()].filter(row => row.userId === actorUserId && row.accountType === actor.accountType)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || String(b.id).localeCompare(String(a.id)))[0];
+  return { actorUserId, projectId, environmentId: environment.id, environmentKind: environment.kind,
+    availableServiceSlots: actor.role === 'ADMIN' || actor.accountType === 'CLUB_MEMBER' ? 64 : Math.max(0, Number(quota?.maxServices ?? 2) - store.quotaUsageForUser(actorUserId).maxServices + serviceIds.size),
+    availableResourceSlots: 64,
+    occupiedServiceSlugs: [...store.environmentServices.values()].filter(row => row.environmentId === environment.id && !serviceIds.has(row.serviceId)).map(row => row.logicalSlug),
+    occupiedResourceSlugs: [...store.environmentResources.values()].filter(row => row.environmentId === environment.id && !resourceIds.has(row.resourceId)).map(row => row.logicalSlug),
+    supportedResourceEngines: ['postgresql', 'mysql', 'mariadb', 'mongodb', 'redis', 'valkey', 'sqlite'].filter(engine => resourceAvailability(engine).live),
+  };
+}
+function templateRequirements(store: ControlPlaneStore, intent: TemplateInstallationIntent): QuotaRequirement[] {
+  return [...intent.services.flatMap(service => serviceQuotaRequirements(store.services.get(service.id), service)),
+    ...intent.resources.flatMap(resource => resourceQuotaRequirements(store.resources.get(resource.id), { ...resource, storageMb: 1024 })),
+    ...intent.services.filter(service => !store.deployments.has(service.deploymentId)).flatMap(() => deploymentQuotaRequirements('production'))];
+}
+function templateVersionKey(id: string, version: number): string { return `${id}:${version}`; }
+function templateCurrent(store: ControlPlaneStore, id: string): TemplateInstallationIntent {
+  const current = store.templateInstallations.get(id);
+  if (!current) throw new TemplateInstallationError('TEMPLATE_NOT_FOUND', 404);
+  return current;
+}
+function templateProgress(store: ControlPlaneStore, intent: TemplateInstallationIntent) {
+  return { ...structuredClone(intent), installation: { id: intent.installationId, projectId: intent.projectId, environmentId: intent.environmentId, environmentKind: intent.environmentKind, version: intent.version, catalogId: intent.catalogId },
+    progress: installationProgress({ resourceStates: intent.resources.map(row => String(store.resources.get(row.id)?.status ?? 'FAILED').toUpperCase()), buildStates: intent.services.map(row => String(store.deployments.get(row.deploymentId)?.status ?? 'FAILED').toUpperCase()) }) };
+}
+function templateList(store: ControlPlaneStore, projectId: string, selector: Readonly<Record<string, unknown>>, actorUserId?: string) {
+  if (actorUserId) templateActor(store, projectId, actorUserId, false);
+  const environment = store.resolveEnvironment(projectId, selector);
+  return [...store.templateInstallations.values()].filter(row => row.projectId === projectId && row.environmentId === environment.id).map(row => templateProgress(store, row));
+}
+function retryTemplateGraph(store: ControlPlaneStore, id: string, input: unknown, actorUserId: string) {
+  assertTemplateAdmission();
+  const current = templateCurrent(store, id);
+  templateActor(store, current.projectId, actorUserId);
+  store.resolveEnvironment(current.projectId, { environmentId: current.environmentId, kind: current.environmentKind });
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TemplateInstallationError('TEMPLATE_INPUT_INVALID', 400);
+  const body = Object.fromEntries(Object.entries(input));
+  if (Object.keys(body).some(key => !['requiredProtocolVersion', 'expectedVersion', 'requestIdempotencyKey'].includes(key)) || body.requiredProtocolVersion !== 2 || typeof body.requestIdempotencyKey !== 'string' || !/^[A-Za-z0-9._:-]{8,128}$/.test(body.requestIdempotencyKey)) throw new TemplateInstallationError('TEMPLATE_INPUT_INVALID', 400);
+  if (body.expectedVersion !== current.version) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  const retries = store.auditLogs.filter(row => row.action === 'template:retry' && row.targetType === 'template-installation' && row.targetId === id);
+  if (retries.some(row => row.metadata?.requestIdempotencyKey === body.requestIdempotencyKey)) return templateProgress(store, current);
+  if (retries.length >= 100) throw new TemplateInstallationError('TEMPLATE_CAPACITY_EXCEEDED', 409);
+  const version = store.templateInstallationVersions.get(templateVersionKey(id, current.version));
+  if (!version) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  for (const [subjectId, hash] of Object.entries(version.ownedHashes)) {
+    const row = store.services.get(subjectId) ?? store.resources.get(subjectId);
+    const binding = store.environmentServices.get(subjectId) ?? store.environmentResources.get(subjectId);
+    if (!row || isDeleting(row) || row.projectId !== current.projectId || binding?.environmentId !== current.environmentId || templateHash(row.desiredSpec) !== hash) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  }
+  const jobs = current.services.map(service => store.workflowJobs.find(job => job.id === service.workflowJobId));
+  if (jobs.some(job => !job) || current.services.some(row => !store.deployments.has(row.deploymentId)) || current.resources.some(row => !store.resources.has(row.id))) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  const timestamp = new Date().toISOString();
+  for (const resource of current.resources) {
+    const row = store.resources.get(resource.id);
+    if (String(row.status).toUpperCase() === 'FAILED') store.resources.set(row.id, { ...row, status: 'PROVISIONING', updatedAt: timestamp });
+  }
+  for (const service of current.services) {
+    const deployment = store.deployments.get(service.deploymentId);
+    const job = jobs.find(row => row.id === service.workflowJobId);
+    if (job.status === 'running' || job.lockedBy || job.lockedAt || deployment.reconcileLockedBy || deployment.reconcileLockedAt || !['FAILED', 'BUILD_FAILED', 'CANCELED', 'CANCELLED'].includes(String(deployment.status).toUpperCase())) continue;
+    if (job.status === 'succeeded') {
+      if (['FAILED', 'CANCELED', 'CANCELLED'].includes(String(deployment.status).toUpperCase()) && deployment.imageUrl) {
+        store.deployments.set(deployment.id, { ...deployment, ...INITIAL_DEPLOYMENT_HEALTH, status: 'IMAGE_READY', reconcileAction: null, errorCode: null, errorMessage: null, finishedAt: null, updatedAt: timestamp });
+      }
+      continue;
+    }
+    store.deployments.set(deployment.id, { ...deployment, status: 'queued', errorCode: null, errorMessage: null, finishedAt: null, updatedAt: timestamp });
+    // Attempts are lease generations: a retry must never revive an old worker's fence.
+    Object.assign(job, { status: 'queued', maxAttempts: Math.max(Number(job.maxAttempts || 3), Number(job.attempts || 0) + 3), lockedBy: null, lockedAt: null, runAfter: timestamp, updatedAt: timestamp });
+  }
+  store.audit(actorUserId, 'template:retry', 'template-installation', id, { requestIdempotencyKey: body.requestIdempotencyKey, version: current.version });
+  return templateProgress(store, current);
+}
+function templateGraphMutation(store: ControlPlaneStore, intent: TemplateInstallationIntent, secretValues: Readonly<Record<string, unknown>>) {
+  assertTemplateAdmission();
+  templateActor(store, intent.projectId, intent.actorUserId);
+  if (!TemplateInstallationIntentSchema.safeParse(intent).success) throw new TemplateInstallationError('TEMPLATE_INPUT_INVALID', 400);
+  assertTemplateSecretValues(intent, secretValues);
+  const environment = store.resolveEnvironment(intent.projectId, { environmentId: intent.environmentId, kind: intent.environmentKind });
+  const replay = [...store.templateInstallations.values()].find(row => row.projectId === intent.projectId && row.requestIdempotencyKey === intent.requestIdempotencyKey);
+  if (replay) {
+    if (replay.requestFingerprint !== intent.requestFingerprint || replay.environmentId !== intent.environmentId || replay.installationId !== intent.installationId) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+    return templateProgress(store, replay);
+  }
+  if (intent.version !== 1 || store.templateInstallations.has(intent.installationId)) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  if ([...store.templateInstallations.values()].some(row => row.environmentId === environment.id && row.catalogId === intent.catalogId)) throw new TemplateInstallationError('TEMPLATE_SLUG_CONFLICT', 409);
+  for (const row of [...intent.services, ...intent.resources]) if (row.projectId !== intent.projectId || row.environmentId !== environment.id) throw new TemplateInstallationError('TEMPLATE_INPUT_INVALID', 400);
+  const ownedHashes: Record<string, string> = {};
+  for (const [key, value] of Object.entries(secretValues)) {
+    const reference = intent.inputs[key];
+    if (typeof reference !== 'string' || !reference.startsWith('secret:')) throw new TemplateInstallationError('TEMPLATE_INPUT_INVALID', 400);
+    const id = reference.slice('secret:'.length);
+    if (store.secrets.has(id)) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+    store.secrets.set(id, { id, scopeType: 'project', scopeId: intent.projectId, key: `template:${intent.installationId}:${key}`, sealedValue: sealSecret(value), valueMasked: '****', metadata: { environmentId: environment.id, installationId: intent.installationId, inputKey: key } });
+  }
+  for (const resource of intent.resources) {
+    if (store.resources.has(resource.id) || [...store.environmentResources.values()].some(row => row.environmentId === environment.id && row.logicalSlug === resource.logicalSlug)) throw new TemplateInstallationError('TEMPLATE_SLUG_CONFLICT', 409);
+    const physicalSlug = environmentPhysicalSlug(environment.kind, environment.id, resource.logicalSlug);
+    const row = { ...resourceData({ ...resource, name: resource.logicalSlug, slug: physicalSlug, plan: 'shared-small', storageMb: 1024 }), id: resource.id, projectId: intent.projectId, name: physicalSlug, slug: physicalSlug, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    store.resources.set(row.id, row);
+    store.environmentResources.set(row.id, { resourceId: row.id, projectId: intent.projectId, environmentId: environment.id, logicalSlug: resource.logicalSlug, displayName: resource.logicalSlug });
+    ownedHashes[row.id] = templateHash(row.desiredSpec);
+  }
+  for (const service of intent.services) {
+    if (store.services.has(service.id) || [...store.environmentServices.values()].some(row => row.environmentId === environment.id && row.logicalSlug === service.logicalSlug)) throw new TemplateInstallationError('TEMPLATE_SLUG_CONFLICT', 409);
+    const environmentVariables = service.secretRefs.map(reference => {
+      const secretId = reference.secretRef.slice('secret:'.length);
+      const secret = store.secrets.get(secretId);
+      if (!secret || secret.scopeType !== 'project' || secret.scopeId !== intent.projectId || secret.metadata?.environmentId !== environment.id) throw new TemplateInstallationError('TEMPLATE_REQUIRED_INPUT_MISSING', 400);
+      return { id: `env_${templateHash([service.id, reference.name]).slice(0, 32)}`, serviceId: service.id, projectId: intent.projectId, key: reference.name, value: null, isSecret: true, valueMasked: '****', secretRef: secretId, source: `template:${intent.installationId}` };
+    });
+    const physicalSlug = environmentPhysicalSlug(environment.kind, environment.id, service.logicalSlug);
+    const spec = { ...service, sourceType: 'template', buildMode: 'dockerfile', dockerfilePath: 'Dockerfile', name: service.logicalSlug, slug: physicalSlug,
+      templateResourceBindings: service.resourceDependencies.map(dependency => {
+        const resource = intent.resources.find(row => row.logicalSlug === dependency.resourceLogicalSlug);
+        if (!resource) throw new TemplateInstallationError('TEMPLATE_RESOURCE_UNSUPPORTED', 409);
+        return { resourceId: resource.id, resourceLogicalSlug: resource.logicalSlug };
+      }), environmentId: environment.id, environmentKind: environment.kind, logicalSlug: service.logicalSlug };
+    const desiredSpec = { ...sanitizeTenantServiceInput(spec), ...spec };
+    const row = { ...serviceData(spec), id: service.id, projectId: intent.projectId, name: service.logicalSlug, slug: physicalSlug, desiredSpec, desiredState: desiredSpec, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    store.services.set(row.id, row);
+    store.environmentServices.set(row.id, { serviceId: row.id, projectId: intent.projectId, environmentId: environment.id, logicalSlug: service.logicalSlug, displayName: service.logicalSlug });
+    for (const variable of environmentVariables) store.environmentVariables.set(variable.id, variable);
+    ownedHashes[row.id] = templateHash(row.desiredSpec);
+    if (store.deployments.has(service.deploymentId) || store.workflowJobs.some(job => job.id === service.workflowJobId)) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+    // The installer already validated a refs-only graph; generic masking would corrupt secretRef/secretKey metadata.
+    store.createDeployment({ id: service.deploymentId, serviceId: row.id, projectId: intent.projectId, environmentId: environment.id, snapshotVersion: 1, desiredSpecSnapshot: structuredClone(desiredSpec), commitSha: intent.sourceDigest.replace(/^sha256:/, ''), requestedByUserId: intent.actorUserId });
+    store.enqueueWorkflowJob({ id: service.workflowJobId, type: 'build-and-deploy', targetType: 'deployment', targetId: service.deploymentId, environmentId: environment.id, operationalProtocolVersion: 2, payload: service.buildJobPayload });
+  }
+  store.templateInstallations.set(intent.installationId, structuredClone(intent));
+  store.templateInstallationVersions.set(templateVersionKey(intent.installationId, intent.version), { intent: structuredClone(intent), ownedHashes });
+  store.audit(intent.actorUserId, 'template:admitted', 'template-installation', intent.installationId, { version: intent.version, environmentId: environment.id, catalogDigest: intent.catalogDigest, sourceDigest: intent.sourceDigest });
+  return templateProgress(store, intent);
+}
+function decodeTemplateVersion(value: unknown): PersistedTemplateVersion {
+  const parsed = PersistedTemplateVersionSchema.safeParse(value);
+  if (!parsed.success) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+  return parsed.data as PersistedTemplateVersion;
+}
+async function loadTemplateStore(tx: Prisma.TransactionClient, projectId: string, actorUserId?: string): Promise<ControlPlaneStore> {
+  const project = await tx.project.findUnique({ where: { id: projectId } });
+  if (!project || isDeleting(project)) throw new TemplateInstallationError('TEMPLATE_NOT_FOUND', 404);
+  const store = new ControlPlaneStore();
+  const [members, environments, services, resources, deployments, installations, versions, secrets, actor] = await Promise.all([
+    tx.membership.findMany({ where: { organizationId: project.organizationId } }), tx.environment.findMany({ where: { projectId } }),
+    tx.service.findMany({ where: { projectId }, include: { environmentBinding: true } }), tx.resource.findMany({ where: { projectId }, include: { environmentBinding: true } }),
+    tx.deployment.findMany({ where: { projectId } }), tx.templateInstallation.findMany({ where: { projectId, deletionRequestedAt: null } }), tx.templateInstallationVersion.findMany({ where: { projectId } }),
+    tx.secretValue.findMany({ where: { scopeType: 'project', scopeId: projectId } }), actorUserId ? tx.user.findUnique({ where: { id: actorUserId }, include: { quotas: true } }) : null,
+  ]);
+  store.projects.set(project.id, project); store.members = members;
+  if (actor) { store.users.set(actor.id, actor); for (const quota of actor.quotas) store.quotas.set(quota.id, quota); }
+  for (const row of environments) store.environments.set(row.id, row);
+  for (const { environmentBinding, ...row } of services) { store.services.set(row.id, row); if (environmentBinding) store.environmentServices.set(row.id, environmentBinding); }
+  for (const { environmentBinding, ...row } of resources) { store.resources.set(row.id, row); if (environmentBinding) store.environmentResources.set(row.id, environmentBinding); }
+  for (const row of deployments) store.deployments.set(row.id, row);
+  for (const row of secrets) store.secrets.set(row.id, row);
+  for (const row of versions) store.templateInstallationVersions.set(templateVersionKey(row.installationId, row.version), decodeTemplateVersion(row.provenance));
+  for (const row of installations) {
+    const record = store.templateInstallationVersions.get(templateVersionKey(row.id, row.version));
+    if (!record || record.intent.projectId !== projectId || record.intent.environmentId !== row.environmentId || record.intent.requestFingerprint !== row.idempotencyFingerprint) throw new TemplateInstallationError('TEMPLATE_VERSION_CONFLICT', 409);
+    store.templateInstallations.set(row.id, record.intent);
+  }
+  return store;
+}
+async function persistTemplateGraph(tx: Prisma.TransactionClient, store: ControlPlaneStore, intent: TemplateInstallationIntent) {
+  for (const reference of Object.values(intent.inputs)) {
+    const secret = store.secrets.get(String(reference).slice('secret:'.length));
+    await tx.secretValue.create({ data: secret });
+  }
+  for (const resource of intent.resources) {
+    const row = store.resources.get(resource.id);
+    await tx.resource.create({ data: { id: resource.id, projectId: intent.projectId, name: row.name, ...resourceData({ ...row, storageMb: 1024 }) } });
+    await tx.environmentResource.create({ data: store.environmentResources.get(resource.id) });
+  }
+  for (const service of intent.services) {
+    const row = store.services.get(service.id);
+    await tx.service.create({ data: { ...serviceData(row.desiredSpec), desiredSpec: JSON.parse(JSON.stringify(row.desiredSpec)), desiredState: JSON.parse(JSON.stringify(row.desiredState)), id: service.id, projectId: intent.projectId, name: row.name, slug: row.slug } });
+    await tx.environmentService.create({ data: store.environmentServices.get(service.id) });
+    await tx.deployment.create({ data: { ...deploymentData(store.deployments.get(service.deploymentId)), id: service.deploymentId, projectId: intent.projectId, serviceId: service.id } });
+    const job = store.workflowJobs.find(candidate => candidate.id === service.workflowJobId);
+    await tx.workflowJob.create({ data: { ...workflowJobData(job), id: job.id } });
+    for (const variable of store.environmentVariables.values()) if (variable.serviceId === service.id) await tx.environmentVariable.create({ data: { ...envVariableData(variable), id: variable.id } });
+  }
+  await tx.templateInstallation.create({ data: { id: intent.installationId, projectId: intent.projectId, environmentId: intent.environmentId, catalogId: intent.catalogId, status: 'pending', version: intent.version, requestIdempotencyKey: intent.requestIdempotencyKey, idempotencyFingerprint: intent.requestFingerprint } });
+  const record = store.templateInstallationVersions.get(templateVersionKey(intent.installationId, intent.version));
+  await tx.templateInstallationVersion.create({ data: { id: intent.installationVersionId, installationId: intent.installationId, projectId: intent.projectId, environmentId: intent.environmentId, version: intent.version, catalogVersion: intent.catalogVersion, catalogDigest: intent.catalogDigest, sourceDigest: intent.sourceDigest, graphDigest: intent.graphDigest, provenance: JSON.parse(JSON.stringify(record)), idempotencyFingerprint: intent.requestFingerprint } });
+  for (const audit of store.auditLogs) await tx.auditLog.create({ data: { actorUserId: intent.actorUserId, action: audit.action, targetType: audit.targetType, targetId: audit.targetId, metadata: audit.metadata } });
+}
 
 export class OperationalPersistenceUnavailable extends Error {
   readonly name = 'OperationalPersistenceUnavailable';
@@ -203,6 +413,21 @@ export class InMemoryControlPlaneRepository {
   constructor(store = new ControlPlaneStore()) {
     this.store = store;
   }
+
+  async templatePreflightContext(projectId: string, selector: Readonly<Record<string, unknown>>, key: string, actorUserId: string) { return memoryTemplateContext(this.store, projectId, selector, key, actorUserId); }
+  async listTemplateInstallations(projectId: string, selector: Readonly<Record<string, unknown>> = {}, actorUserId?: string) { return templateList(this.store, projectId, selector, actorUserId); }
+  async getTemplateInstallation(id: string, actorUserId?: string) {
+    const current = this.store.templateInstallations.get(id);
+    if (!current) return null;
+    if (actorUserId) templateActor(this.store, current.projectId, actorUserId, false);
+    return templateProgress(this.store, current);
+  }
+  async installTemplateGraph(intent: TemplateInstallationIntent, secretValues: Readonly<Record<string, unknown>> = {}) {
+    templateActor(this.store, intent.projectId, intent.actorUserId);
+    const replay = [...this.store.templateInstallations.values()].some(row => row.projectId === intent.projectId && row.requestIdempotencyKey === intent.requestIdempotencyKey);
+    return this.runQuotaMutation(intent.actorUserId, 'template:install', replay ? [] : templateRequirements(this.store, intent), () => templateGraphMutation(this.store, intent, secretValues));
+  }
+  async retryTemplateInstallation(id: string, input: unknown, actorUserId: string) { return this.runQuotaMutation(actorUserId, 'template:retry', [], () => retryTemplateGraph(this.store, id, input, actorUserId)); }
 
   requireOperationalPrismaClient(): never {
     throw new OperationalPersistenceUnavailable();
@@ -594,6 +819,71 @@ export class PrismaControlPlaneRepository {
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
+  }
+
+  async templatePreflightContext(projectId: string, selector: Readonly<Record<string, unknown>>, key: string, actorUserId: string) {
+    return this.prisma.$transaction(async tx => {
+      const store = await loadTemplateStore(tx, projectId, actorUserId);
+      const context = memoryTemplateContext(store, projectId, selector, key, actorUserId);
+      const actor = store.users.get(actorUserId);
+      if (actor.role === 'ADMIN' || actor.accountType === 'CLUB_MEMBER') return context;
+      const quota = await tx.quota.findFirst({ where: { userId: actorUserId, accountType: actor.accountType }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] });
+      const usage = await prismaQuotaUsage(tx, actorUserId);
+      const replay = [...store.templateInstallations.values()].find(row => row.projectId === projectId && row.requestIdempotencyKey === key);
+      return { ...context, availableServiceSlots: Math.max(0, Number(quota?.maxServices ?? 2) - Number(usage.maxServices || 0) + (replay?.services.length ?? 0)) };
+    });
+  }
+  async listTemplateInstallations(projectId: string, selector: Readonly<Record<string, unknown>> = {}, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => templateList(await loadTemplateStore(tx, projectId, actorUserId), projectId, selector, actorUserId));
+  }
+  async getTemplateInstallation(id: string, actorUserId?: string) {
+    return this.prisma.$transaction(async tx => {
+      const installation = await tx.templateInstallation.findFirst({ where: { id, deletionRequestedAt: null } });
+      if (!installation) return null;
+      const store = await loadTemplateStore(tx, installation.projectId, actorUserId);
+      if (actorUserId) templateActor(store, installation.projectId, actorUserId, false);
+      return templateProgress(store, templateCurrent(store, id));
+    });
+  }
+  async installTemplateGraph(intent: TemplateInstallationIntent, secretValues: Readonly<Record<string, unknown>> = {}) {
+    assertTemplateAdmission();
+    return serializableTransactionWithRetry(this.prisma, async (tx: Prisma.TransactionClient) => {
+      await tx.$queryRawUnsafe('SELECT 1::int AS "locked" FROM pg_advisory_xact_lock(hashtext($1))', `raibitserver:quota:${intent.actorUserId}`);
+      const store = await loadTemplateStore(tx, intent.projectId, intent.actorUserId);
+      templateActor(store, intent.projectId, intent.actorUserId);
+      const replay = [...store.templateInstallations.values()].some(row => row.projectId === intent.projectId && row.requestIdempotencyKey === intent.requestIdempotencyKey);
+      if (!replay) await enforcePrismaQuotaRequirements(tx, intent.actorUserId, 'template:install', templateRequirements(store, intent));
+      const result = templateGraphMutation(store, intent, secretValues);
+      if (!replay) await persistTemplateGraph(tx, store, intent);
+      return result;
+    });
+  }
+  async retryTemplateInstallation(id: string, input: unknown, actorUserId: string) {
+    return serializableTransactionWithRetry(this.prisma, async (tx: Prisma.TransactionClient) => {
+      const installation = await tx.templateInstallation.findFirst({ where: { id, deletionRequestedAt: null } });
+      if (!installation) throw new TemplateInstallationError('TEMPLATE_NOT_FOUND', 404);
+      const store = await loadTemplateStore(tx, installation.projectId, actorUserId);
+      const current = templateCurrent(store, id);
+      const jobIds = current.services.map(row => row.workflowJobId);
+      // Lock the existing jobs before inspecting status so a worker cannot be reset after claiming one.
+      for (const jobId of [...jobIds].sort()) await tx.$queryRawUnsafe('SELECT "id" FROM "WorkflowJob" WHERE "id" = $1 FOR UPDATE', jobId);
+      store.workflowJobs = await tx.workflowJob.findMany({ where: { id: { in: jobIds } } });
+      store.auditLogs = await tx.auditLog.findMany({ where: { action: 'template:retry', targetType: 'template-installation', targetId: id } });
+      const before = snapshotInMemoryStore(store);
+      const result = retryTemplateGraph(store, id, input, actorUserId);
+      for (const resource of current.resources) {
+        const row = store.resources.get(resource.id);
+        if (row.status !== before.resources.get(resource.id)?.status) await tx.resource.update({ where: { id: row.id }, data: { status: row.status } });
+      }
+      for (const service of current.services) {
+        const row = store.deployments.get(service.deploymentId);
+        if (row.status !== before.deployments.get(row.id)?.status) await tx.deployment.update({ where: { id: row.id }, data: { status: row.status, errorCode: null, errorMessage: null, finishedAt: null, ...(row.status === 'IMAGE_READY' ? { ...INITIAL_DEPLOYMENT_HEALTH, reconcileAction: null } : {}) } });
+        const job = store.workflowJobs.find(candidate => candidate.id === service.workflowJobId);
+        if (JSON.stringify(job) !== JSON.stringify(before.workflowJobs.find((candidate: { id: string }) => candidate.id === service.workflowJobId))) await tx.workflowJob.update({ where: { id: job.id }, data: prismaWorkflowJobUpdateData(job) });
+      }
+      for (const audit of store.auditLogs.slice(before.auditLogs.length)) await tx.auditLog.create({ data: { actorUserId, action: audit.action, targetType: audit.targetType, targetId: audit.targetId, metadata: audit.metadata } });
+      return result;
+    });
   }
 
   requireOperationalPrismaClient(): PrismaClient {
@@ -4073,7 +4363,7 @@ async function enforcePrismaQuotaRequirements(db: any, actorUserId: any, action:
     throw error;
   }
   const accountType = user.accountType || 'NON_CLUB';
-  const quota = await db.quota.findFirst({ where: { userId, accountType } })
+  const quota = await db.quota.findFirst({ where: { userId, accountType }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] })
     || await db.quota.upsert({ where: { id: `quota_${userId}_${accountType}` }, update: {}, create: { id: `quota_${userId}_${accountType}`, userId, accountType } });
   const usage = await prismaQuotaUsage(db, userId);
   for (const requirement of combined) {

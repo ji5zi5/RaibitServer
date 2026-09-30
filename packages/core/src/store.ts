@@ -56,6 +56,9 @@ import {
   utcMonthBounds,
 } from './store-helpers.ts';
 import { validateServiceRuntime, validateServiceRuntimeUpdate } from './service-runtime.ts';
+import type { TemplateInstallationIntent } from './template-installations.ts';
+
+export type PersistedTemplateVersion = Readonly<{ intent: TemplateInstallationIntent; ownedHashes: Readonly<Record<string, string>> }>;
 
 export const AUTH_RETENTION_PRUNE_BATCH_SIZE = 256;
 
@@ -93,6 +96,8 @@ export class ControlPlaneStore {
   authRateLimits: Map<string, any>;
   oauthTransactions = new Map<string, OAuthTransactionRecord>();
   previewLineages = new Map<string, any>();
+  templateInstallations = new Map<string, TemplateInstallationIntent>();
+  templateInstallationVersions = new Map<string, PersistedTemplateVersion>();
   private githubCatalogPageFetcher: GitHubCatalogPageFetcher | null = null;
 
   constructor() {
@@ -2248,7 +2253,9 @@ export class ControlPlaneStore {
       this.audit(userId, 'quota:block', action || 'action', metric || action || 'unknown', { reason: user.approvalStatus || 'PENDING' });
       throw forbidden(`user ${userId} is ${user.approvalStatus || 'PENDING'} and cannot ${action}`);
     }
-    const quota = [...this.quotas.values()].find((row) => row.userId === userId) || this.setQuota({ userId, accountType: user.accountType || 'NON_CLUB' });
+    const quota = [...this.quotas.values()].filter((row) => row.userId === userId && row.accountType === (user.accountType || 'NON_CLUB'))
+      .sort((a, b) => dateMs(b.updatedAt) - dateMs(a.updatedAt) || String(b.id).localeCompare(String(a.id)))[0]
+      || this.setQuota({ userId, accountType: user.accountType || 'NON_CLUB' });
     if (metric && quota[metric] !== undefined) {
       const current = this.quotaUsageForUser(userId)[metric] || 0;
       const requested = current + Number(increment || 0);

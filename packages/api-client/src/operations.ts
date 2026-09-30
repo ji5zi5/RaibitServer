@@ -93,6 +93,14 @@ export function createOperationsClient(transport: OperationTransport) {
     };
   }
   return {
+    'templates-list': bind(apiOperations['templates-list']),
+    'templates-get': bind(apiOperations['templates-get']),
+    'templates-source': bind(apiOperations['templates-source']),
+    'template-installations-list': bind(apiOperations['template-installations-list']),
+    'template-installations-preflight': bind(apiOperations['template-installations-preflight']),
+    'template-installations-create': bind(apiOperations['template-installations-create']),
+    'template-installations-get': bind(apiOperations['template-installations-get']),
+    'template-installations-retry': bind(apiOperations['template-installations-retry']),
     'discord-get': bind(apiOperations['discord-get']),
     'discord-configure': bind(apiOperations['discord-configure']),
     'discord-disable': bind(apiOperations['discord-disable']),

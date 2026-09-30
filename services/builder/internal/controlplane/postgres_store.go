@@ -140,6 +140,34 @@ WITH exhausted AS (
 		AND (COALESCE(environment.kind, 'prod') = 'prod' OR ($10 = 2 AND wj."operationalProtocolVersion" = 2))
 		AND ($10 = 1 OR binding."serviceId" IS NOT NULL)
         AND (deployment."environmentId" IS NULL OR deployment."environmentId" = binding."environmentId")
+        AND (
+          (NOT (wj.payload ? 'templateResourceIds')
+            AND LOWER(COALESCE(deployment."desiredSpecSnapshot" ->> 'sourceType', service."sourceType", '')) <> 'template'
+            AND LOWER(COALESCE(wj.payload ->> 'sourceType', '')) <> 'template')
+          OR (
+            jsonb_typeof(wj.payload -> 'templateResourceIds') = 'array'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(wj.payload -> 'templateResourceIds') = 'array'
+                  THEN wj.payload -> 'templateResourceIds' ELSE '[]'::jsonb END
+              ) AS required(value)
+              WHERE jsonb_typeof(required.value) <> 'string'
+                OR (required.value #>> '{}') = ''
+                OR BTRIM(required.value #>> '{}') <> (required.value #>> '{}')
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM "Resource" AS resource
+                  JOIN "EnvironmentResource" AS resource_binding
+                    ON resource_binding."resourceId" = resource.id AND resource_binding."projectId" = resource."projectId"
+                  WHERE resource.id = required.value #>> '{}'
+                    AND resource."projectId" = deployment."projectId"
+                    AND resource_binding."environmentId" = deployment."environmentId"
+                    AND UPPER(BTRIM(resource.status)) = 'READY'
+                )
+            )
+          )
+        )
     )
   ORDER BY wj."runAfter" ASC, wj."createdAt" ASC, wj.id ASC
   FOR UPDATE SKIP LOCKED

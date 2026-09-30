@@ -13,6 +13,7 @@ import { acceptOrganizationInvite, assertInteractiveOrganizationCreator, Organiz
 import { changeOrganizationMembershipRole, leaveOrganization, listOrganizationMembers, removeOrganizationMember, revokeOrganizationInvite } from '@raibitserver/core';
 import type { OrganizationCreateRequest, OrganizationInviteCreate, OrganizationMembershipRoleChange, OrganizationMembershipSnapshot } from '@raibitserver/schemas';
 import type { ResourceRecoveryRepository, RecoveryScope } from '@raibitserver/core';
+import { TemplateInstallationError, type TemplateInstallationIntent } from '@raibitserver/core';
 
 /**
  * NestJS-facing desired-state service.
@@ -50,6 +51,45 @@ export class RAIBITSERVERService implements OnModuleDestroy {
   async requireOperationalPrismaClient() {
     const repository = await this.repositoryPromise;
     return repository.requireOperationalPrismaClient();
+  }
+
+  async templatePreflightContext(projectId: string, selector: Readonly<Record<string, unknown>>, key: string, subject: Record<string, unknown>) {
+    const repository = await this.repositoryPromise;
+    const project = await assertProjectAccess(repository, projectId, subject);
+    enforceActionScope(subject, 'deploy:run', { organizationId: project.organizationId });
+    return repositoryMutation(() => repository.templatePreflightContext(projectId, parseEnvironmentSelector(selector), key, String(subject.id ?? '')));
+  }
+
+  async installTemplateGraph(intent: TemplateInstallationIntent, secretValues: Readonly<Record<string, string>>, subject: Record<string, unknown>) {
+    const repository = await this.repositoryPromise;
+    const project = await assertProjectAccess(repository, intent.projectId, subject);
+    enforceActionScope(subject, 'deploy:run', { organizationId: project.organizationId });
+    return repositoryMutation(() => repository.installTemplateGraph({ ...intent, actorUserId: String(subject.id ?? '') }, secretValues));
+  }
+
+  async listTemplateInstallations(projectId: string, selector: Readonly<Record<string, unknown>>, subject: Record<string, unknown>) {
+    const repository = await this.repositoryPromise;
+    const project = await assertProjectAccess(repository, projectId, subject);
+    enforceActionScope(subject, 'project:read', { organizationId: project.organizationId });
+    return repositoryMutation(() => repository.listTemplateInstallations(projectId, parseEnvironmentSelector(selector), isGlobalSubject(subject) ? undefined : String(subject.id ?? '')));
+  }
+
+  async getTemplateInstallation(id: string, selector: Readonly<Record<string, unknown>>, subject: Record<string, unknown>) {
+    const repository = await this.repositoryPromise;
+    const installation = await repositoryMutation(() => repository.getTemplateInstallation(id, isGlobalSubject(subject) ? undefined : String(subject.id ?? '')));
+    if (!installation) throw new TemplateInstallationError('TEMPLATE_NOT_FOUND', 404);
+    const project = await assertProjectAccess(repository, installation.projectId, subject);
+    enforceActionScope(subject, 'project:read', { organizationId: project.organizationId });
+    await assertEntityEnvironment(repository, installation, selector);
+    return installation;
+  }
+
+  async retryTemplateInstallation(id: string, input: unknown, selector: Readonly<Record<string, unknown>>, subject: Record<string, unknown>) {
+    const installation = await this.getTemplateInstallation(id, selector, subject);
+    const repository = await this.repositoryPromise;
+    const project = await assertProjectAccess(repository, installation.projectId, subject);
+    enforceActionScope(subject, 'deploy:run', { organizationId: project.organizationId });
+    return repositoryMutation(() => repository.retryTemplateInstallation(id, input, String(subject.id ?? '')));
   }
 
   async signup(input: Record<string, any>, context: Record<string, any> = {}) {
@@ -280,6 +320,7 @@ export class RAIBITSERVERService implements OnModuleDestroy {
       serviceId: (id: string) => repository.getService(id),
       resourceId: (id: string) => repository.getResource(id),
       deploymentId: (id: string) => repository.getDeployment(id),
+      installationId: (id: string) => repository.getTemplateInstallation(id),
       domainId: async (id: string) => {
         const domain = await repository.getCustomDomain(id);
         return domain ? assertServiceInProject(repository, domain.projectId, domain.serviceId) : null;
@@ -1471,6 +1512,7 @@ async function repositoryMutation<T>(operation: () => T | Promise<T>): Promise<T
 }
 
 function nestAuthError(error: any) {
+  if (error instanceof TemplateInstallationError) return new HttpException({ statusCode: error.statusCode, message: error.code, code: error.code }, error.statusCode);
   if (error instanceof OrganizationCreationError) {
     return typedOperationException(error.statusCode, error.code, false, error.statusCode === 401 || error.statusCode === 403);
   }

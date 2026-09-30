@@ -54,6 +54,7 @@ export type { OperationalBackfillInput, OperationalBackfillProjection, Operation
 export * from './discord-alerts.ts';
 export { PrismaDiscordAlertsRepository } from './discord-alerts-postgres.ts';
 export * from './backup-policy.ts';
+export * from './template-installations.ts';
 export { PrismaBackupPolicyPersistence } from './backup-policy-postgres.ts';
 export { sealSecret, openSecret, secureRandomSecret, publicSecretRecord } from './secret-vault.ts';
 export { runDbConsoleQuery, browseDbConsole, resourceConsoleView } from './db-console.ts';

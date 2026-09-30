@@ -7,6 +7,378 @@ info:
 servers:
   - url: http://localhost:3000/api
 paths:
+  /templates:
+    get:
+      operationId: templates-list
+      parameters: []
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/templates-listResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+  /templates/{catalogId}/versions/{catalogVersion}:
+    get:
+      operationId: templates-get
+      parameters:
+        - name: catalogId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: catalogVersion
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/templates-getResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+  /templates/{catalogId}/versions/{catalogVersion}/source:
+    get:
+      operationId: templates-source
+      parameters:
+        - name: catalogId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: catalogVersion
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: catalogDigest
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: ^sha256:[a-f0-9]{64}$
+        - name: sourceDigest
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: ^sha256:[a-f0-9]{64}$
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/templates-sourceResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+  /projects/{projectId}/template-installations:
+    get:
+      operationId: template-installations-list
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: environmentId
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+        - name: environmentKind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/template-installations-listResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+    post:
+      operationId: template-installations-create
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: environmentId
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+        - name: environmentKind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/template-installations-preflightBody"
+      responses:
+        "202":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/template-installations-createResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: deploy:run
+  /projects/{projectId}/template-installations/preflight:
+    post:
+      operationId: template-installations-preflight
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: environmentId
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+        - name: environmentKind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/template-installations-preflightBody"
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/template-installations-preflightResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: deploy:run
+  /template-installations/{installationId}:
+    get:
+      operationId: template-installations-get
+      parameters:
+        - name: installationId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: environmentId
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+        - name: environmentKind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/template-installations-createResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: project:read
+  /template-installations/{installationId}/retry:
+    post:
+      operationId: template-installations-retry
+      parameters:
+        - name: installationId
+          in: path
+          required: true
+          schema:
+            $schema: https://json-schema.org/draft/2020-12/schema
+            type: string
+            minLength: 1
+        - name: environmentId
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+        - name: environment
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+        - name: environmentKind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - prod
+              - dev
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/template-installations-retryBody"
+      responses:
+        "202":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/template-installations-createResponse"
+        default:
+          description: Typed error response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+      security:
+        - bearerAuth: []
+      x-permission: deploy:run
   /projects/{projectId}/integrations/discord:
     get:
       operationId: discord-get
@@ -7606,6 +7978,827 @@ components:
         - payload
       additionalProperties:
         $ref: "#/components/schemas/JsonValue"
+    templates-listResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        catalogDigest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        availability:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            reasonCode:
+              anyOf:
+                - type: string
+                  const: TEMPLATE_UNAVAILABLE
+                - type: "null"
+          required:
+            - enabled
+            - reasonCode
+          additionalProperties: false
+        starters:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              version:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              immutable:
+                type: boolean
+                const: true
+              inputs:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                    kind:
+                      type: string
+                      const: secret
+                    required:
+                      type: boolean
+                  required:
+                    - key
+                    - kind
+                    - required
+                  additionalProperties: false
+              defaults:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties:
+                  type: string
+              graph:
+                type: object
+                properties:
+                  services:
+                    minItems: 1
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        logicalSlug:
+                          type: string
+                          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                        type:
+                          type: string
+                          enum:
+                            - web
+                            - worker
+                            - private
+                            - cron
+                            - job
+                        buildMode:
+                          type: string
+                          const: dockerfile
+                        environment:
+                          type: object
+                          propertyNames:
+                            type: string
+                          additionalProperties:
+                            anyOf:
+                              - type: object
+                                properties:
+                                  input:
+                                    type: string
+                                    pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                                required:
+                                  - input
+                                additionalProperties: false
+                              - type: object
+                                properties:
+                                  resource:
+                                    type: string
+                                    pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                                  secretKey:
+                                    type: string
+                                    pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                                required:
+                                  - resource
+                                  - secretKey
+                                additionalProperties: false
+                              - type: object
+                                properties:
+                                  default:
+                                    type: string
+                                required:
+                                  - default
+                                additionalProperties: false
+                        ingress:
+                          type: boolean
+                        port:
+                          type: integer
+                          minimum: 1
+                          maximum: 65535
+                        healthCheck:
+                          type: string
+                          pattern: ^\/.*
+                      required:
+                        - logicalSlug
+                        - type
+                        - buildMode
+                        - environment
+                        - ingress
+                      additionalProperties: false
+                  resources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        logicalSlug:
+                          type: string
+                          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                        engine:
+                          type: string
+                          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                        plan:
+                          type: string
+                          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                      required:
+                        - logicalSlug
+                        - engine
+                        - plan
+                      additionalProperties: false
+                required:
+                  - services
+                  - resources
+                additionalProperties: false
+              source:
+                type: object
+                properties:
+                  digest:
+                    type: string
+                    pattern: ^sha256:[a-f0-9]{64}$
+                  byteCount:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  fileCount:
+                    type: integer
+                    exclusiveMinimum: 0
+                    maximum: 9007199254740991
+                  format:
+                    type: string
+                    const: canonical-json-v1
+                  normalization:
+                    type: string
+                    const: sorted-posix-paths-fixed-modes-no-timestamps
+                required:
+                  - digest
+                  - byteCount
+                  - fileCount
+                  - format
+                  - normalization
+                additionalProperties: false
+              provenance:
+                type: object
+                properties:
+                  baseImages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        image:
+                          type: string
+                        indexDigest:
+                          type: string
+                          pattern: ^sha256:[a-f0-9]{64}$
+                        linuxAmd64Digest:
+                          type: string
+                          pattern: ^sha256:[a-f0-9]{64}$
+                      required:
+                        - image
+                        - indexDigest
+                        - linuxAmd64Digest
+                      additionalProperties: false
+                  dependencies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        version:
+                          type: string
+                      required:
+                        - name
+                        - version
+                      additionalProperties: false
+                  dependencyLockDigest:
+                    type: string
+                    pattern: ^sha256:[a-f0-9]{64}$
+                  observedBefore:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+                required:
+                  - baseImages
+                  - dependencies
+                  - dependencyLockDigest
+                  - observedBefore
+                additionalProperties: false
+            required:
+              - id
+              - version
+              - immutable
+              - inputs
+              - defaults
+              - graph
+              - source
+              - provenance
+            additionalProperties: false
+      required:
+        - catalogDigest
+        - availability
+        - starters
+      additionalProperties: false
+    templates-getResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        catalogDigest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        availability:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            reasonCode:
+              anyOf:
+                - type: string
+                  const: TEMPLATE_UNAVAILABLE
+                - type: "null"
+          required:
+            - enabled
+            - reasonCode
+          additionalProperties: false
+        starter:
+          type: object
+          properties:
+            id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            version:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            immutable:
+              type: boolean
+              const: true
+            inputs:
+              type: array
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                  kind:
+                    type: string
+                    const: secret
+                  required:
+                    type: boolean
+                required:
+                  - key
+                  - kind
+                  - required
+                additionalProperties: false
+            defaults:
+              type: object
+              propertyNames:
+                type: string
+              additionalProperties:
+                type: string
+            graph:
+              type: object
+              properties:
+                services:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      logicalSlug:
+                        type: string
+                        pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                      type:
+                        type: string
+                        enum:
+                          - web
+                          - worker
+                          - private
+                          - cron
+                          - job
+                      buildMode:
+                        type: string
+                        const: dockerfile
+                      environment:
+                        type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties:
+                          anyOf:
+                            - type: object
+                              properties:
+                                input:
+                                  type: string
+                                  pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                              required:
+                                - input
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                resource:
+                                  type: string
+                                  pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                                secretKey:
+                                  type: string
+                                  pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                              required:
+                                - resource
+                                - secretKey
+                              additionalProperties: false
+                            - type: object
+                              properties:
+                                default:
+                                  type: string
+                              required:
+                                - default
+                              additionalProperties: false
+                      ingress:
+                        type: boolean
+                      port:
+                        type: integer
+                        minimum: 1
+                        maximum: 65535
+                      healthCheck:
+                        type: string
+                        pattern: ^\/.*
+                    required:
+                      - logicalSlug
+                      - type
+                      - buildMode
+                      - environment
+                      - ingress
+                    additionalProperties: false
+                resources:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      logicalSlug:
+                        type: string
+                        pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                      engine:
+                        type: string
+                        pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                      plan:
+                        type: string
+                        pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+                    required:
+                      - logicalSlug
+                      - engine
+                      - plan
+                    additionalProperties: false
+              required:
+                - services
+                - resources
+              additionalProperties: false
+            source:
+              type: object
+              properties:
+                digest:
+                  type: string
+                  pattern: ^sha256:[a-f0-9]{64}$
+                byteCount:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                fileCount:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                format:
+                  type: string
+                  const: canonical-json-v1
+                normalization:
+                  type: string
+                  const: sorted-posix-paths-fixed-modes-no-timestamps
+              required:
+                - digest
+                - byteCount
+                - fileCount
+                - format
+                - normalization
+              additionalProperties: false
+            provenance:
+              type: object
+              properties:
+                baseImages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      image:
+                        type: string
+                      indexDigest:
+                        type: string
+                        pattern: ^sha256:[a-f0-9]{64}$
+                      linuxAmd64Digest:
+                        type: string
+                        pattern: ^sha256:[a-f0-9]{64}$
+                    required:
+                      - image
+                      - indexDigest
+                      - linuxAmd64Digest
+                    additionalProperties: false
+                dependencies:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      version:
+                        type: string
+                    required:
+                      - name
+                      - version
+                    additionalProperties: false
+                dependencyLockDigest:
+                  type: string
+                  pattern: ^sha256:[a-f0-9]{64}$
+                observedBefore:
+                  type: string
+                  format: date-time
+                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z))$
+              required:
+                - baseImages
+                - dependencies
+                - dependencyLockDigest
+                - observedBefore
+              additionalProperties: false
+          required:
+            - id
+            - version
+            - immutable
+            - inputs
+            - defaults
+            - graph
+            - source
+            - provenance
+          additionalProperties: false
+      required:
+        - catalogDigest
+        - availability
+        - starter
+      additionalProperties: false
+    templates-sourceResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        contentType:
+          type: string
+          const: application/vnd.raibitserver.starter-source.v1+json
+        filename:
+          type: string
+        catalogId:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        catalogVersion:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        catalogDigest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        sourceDigest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        source:
+          type: object
+          properties:
+            id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            version:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            digest:
+              type: string
+              pattern: ^sha256:[a-f0-9]{64}$
+            files:
+              type: array
+              items:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  mode:
+                    type: string
+                    enum:
+                      - "0644"
+                      - "0755"
+                  size:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  digest:
+                    type: string
+                    pattern: ^sha256:[a-f0-9]{64}$
+                  contentBase64:
+                    type: string
+                required:
+                  - path
+                  - mode
+                  - size
+                  - digest
+                  - contentBase64
+                additionalProperties: false
+          required:
+            - id
+            - version
+            - digest
+            - files
+          additionalProperties: false
+      required:
+        - contentType
+        - filename
+        - catalogId
+        - catalogVersion
+        - catalogDigest
+        - sourceDigest
+        - source
+      additionalProperties: false
+    template-installations-listResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        installations:
+          type: array
+          items:
+            $ref: "#/components/schemas/template-installations-createResponse"
+      required:
+        - installations
+      additionalProperties: false
+    template-installations-preflightResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        projectId:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        environmentId:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        environmentKind:
+          type: string
+          enum:
+            - prod
+            - dev
+        catalogId:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        catalogVersion:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              logicalSlug:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              type:
+                type: string
+                enum:
+                  - web
+                  - worker
+                  - private
+                  - cron
+                  - job
+            required:
+              - logicalSlug
+              - type
+            additionalProperties: false
+        resources:
+          type: array
+          items:
+            type: object
+            properties:
+              logicalSlug:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              engine:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              plan:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            required:
+              - logicalSlug
+              - engine
+              - plan
+            additionalProperties: false
+      required:
+        - projectId
+        - environmentId
+        - environmentKind
+        - catalogId
+        - catalogVersion
+        - services
+        - resources
+      additionalProperties: false
+    template-installations-preflightBody:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        requiredProtocolVersion:
+          type: number
+          const: 2
+        catalogId:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        catalogVersion:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+        catalogDigest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        sourceDigest:
+          type: string
+          pattern: ^sha256:[a-f0-9]{64}$
+        requestIdempotencyKey:
+          type: string
+          pattern: ^[A-Za-z0-9._:-]{8,128}$
+        inputs:
+          default: {}
+          type: object
+          propertyNames:
+            type: string
+            pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 16384
+            pattern: ^[^\u0000\r\n]+$
+      required:
+        - requiredProtocolVersion
+        - catalogId
+        - catalogVersion
+        - catalogDigest
+        - sourceDigest
+        - requestIdempotencyKey
+        - inputs
+      additionalProperties: false
+    template-installations-createResponse:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        installation:
+          type: object
+          properties:
+            id:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            projectId:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            environmentId:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            environmentKind:
+              type: string
+              enum:
+                - prod
+                - dev
+            version:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            catalogId:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            catalogVersion:
+              type: string
+              pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+          required:
+            - id
+            - projectId
+            - environmentId
+            - environmentKind
+            - version
+            - catalogId
+            - catalogVersion
+          additionalProperties: false
+        progress:
+          type: object
+          properties:
+            status:
+              type: string
+              enum:
+                - provisioning
+                - building
+                - failed
+                - ready
+            completed:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            total:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+          required:
+            - status
+            - completed
+            - total
+          additionalProperties: false
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              logicalSlug:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              type:
+                type: string
+                enum:
+                  - web
+                  - worker
+                  - private
+                  - cron
+                  - job
+              id:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              deploymentId:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            required:
+              - logicalSlug
+              - type
+              - id
+              - deploymentId
+            additionalProperties: false
+        resources:
+          type: array
+          items:
+            type: object
+            properties:
+              logicalSlug:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              engine:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              plan:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+              id:
+                type: string
+                pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$
+            required:
+              - logicalSlug
+              - engine
+              - plan
+              - id
+            additionalProperties: false
+      required:
+        - installation
+        - progress
+        - services
+        - resources
+      additionalProperties: false
+    template-installations-retryBody:
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        requiredProtocolVersion:
+          type: number
+          const: 2
+        expectedVersion:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        requestIdempotencyKey:
+          type: string
+          pattern: ^[A-Za-z0-9._:-]{8,128}$
+      required:
+        - requiredProtocolVersion
+        - expectedVersion
+        - requestIdempotencyKey
+      additionalProperties: false
     discord-getResponse:
       $schema: https://json-schema.org/draft/2020-12/schema
       anyOf:

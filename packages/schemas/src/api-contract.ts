@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import * as Operational from './operational-api.ts';
+import * as Templates from './templates.ts';
 import { DomainRentalSchema, DomainRentalListSchema, DomainRentalCreateSchema, DomainRentalUpdateSchema, DomainRentalDeleteSchema, DomainRentalDeletedSchema } from './domain-rentals.ts';
 import { DeploymentOperationInputSchema } from './deployment-operation.ts';
 import { DeploymentHistoryQuerySchema, DeploymentHistoryResponseSchema, DeploymentHistoryRowSchema } from './deployment-history.ts';
@@ -20,6 +21,8 @@ const project = z.object({ projectId: id });
 const service = z.object({ serviceId: id });
 const deployment = z.object({ deploymentId: id });
 const resource = z.object({ resourceId: id });
+const templateVersion = z.object({ catalogId: id, catalogVersion: id });
+const templateInstallation = z.object({ installationId: id });
 const backup = z.object({ backupId: id });
 const restore = z.object({ restoreId: id });
 const user = z.object({ userId: id });
@@ -66,6 +69,14 @@ function operation<I extends z.ZodType, O extends z.ZodType>(spec: { readonly me
 // A transport contract, not a list of claimed Nest handlers. Runtime parity discovers
 // the independent module graph and verifies every verb, path, status and permission.
 export const apiOperations = {
+  'templates-list': operation({ method: 'get', path: '/templates', status: 200, permission: 'project:read', input: noInput, response: Templates.TemplateCatalogResponseSchema }),
+  'templates-get': operation({ method: 'get', path: '/templates/{catalogId}/versions/{catalogVersion}', status: 200, permission: 'project:read', input: input(templateVersion, M.Empty, M.Empty), response: Templates.TemplateDetailResponseSchema }),
+  'templates-source': operation({ method: 'get', path: '/templates/{catalogId}/versions/{catalogVersion}/source', status: 200, permission: 'project:read', input: input(templateVersion, z.object({ catalogDigest: Templates.TemplateInstallRequestSchema.shape.catalogDigest, sourceDigest: Templates.TemplateInstallRequestSchema.shape.sourceDigest }).strict(), M.Empty), response: Templates.TemplateSourceDownloadSchema }),
+  'template-installations-list': operation({ method: 'get', path: '/projects/{projectId}/template-installations', status: 200, permission: 'project:read', input: input(project, EnvironmentSelectorSchema, M.Empty), response: Templates.TemplateInstallationListResponseSchema }),
+  'template-installations-preflight': operation({ method: 'post', path: '/projects/{projectId}/template-installations/preflight', status: 200, permission: 'deploy:run', input: input(project, EnvironmentSelectorSchema, Templates.TemplateInstallRequestSchema), response: Templates.TemplatePreflightResponseSchema }),
+  'template-installations-create': operation({ method: 'post', path: '/projects/{projectId}/template-installations', status: 202, permission: 'deploy:run', input: input(project, EnvironmentSelectorSchema, Templates.TemplateInstallRequestSchema), response: Templates.TemplateInstallationResponseSchema }),
+  'template-installations-get': operation({ method: 'get', path: '/template-installations/{installationId}', status: 200, permission: 'project:read', input: input(templateInstallation, EnvironmentSelectorSchema, M.Empty), response: Templates.TemplateInstallationResponseSchema }),
+  'template-installations-retry': operation({ method: 'post', path: '/template-installations/{installationId}/retry', status: 202, permission: 'deploy:run', input: input(templateInstallation, EnvironmentSelectorSchema, Templates.TemplateRetryRequestSchema), response: Templates.TemplateInstallationResponseSchema }),
   'discord-get': operation({ method: 'get', path: '/projects/{projectId}/integrations/discord', status: 200, permission: 'notifications:read', input: input(project, M.Empty, M.Empty), response: Operational.DiscordDestinationReadSchema }),
   'discord-configure': operation({ method: 'put', path: '/projects/{projectId}/integrations/discord', status: 200, permission: 'notifications:manage', input: input(project, M.Empty, Operational.DiscordConfigurationSchema), response: Operational.DiscordDestinationSchema }),
   'discord-disable': operation({ method: 'post', path: '/projects/{projectId}/integrations/discord/disable', status: 200, permission: 'notifications:manage', input: input(project, M.Empty, Operational.DiscordExpectedVersionSchema), response: Operational.DiscordDestinationSchema }),

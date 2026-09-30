@@ -196,7 +196,7 @@ func (r *ServiceReconciler) reconcileProjectDeletion(ctx context.Context, projec
 	var commands []string
 	lease, err := r.reconcileDeletionWithHeartbeat(ctx, project.DeletionLease(), r.store.RenewProjectDeletionLease, func(processCtx context.Context, fence func(context.Context) error) error {
 		var cleanupErr error
-		commands, cleanupErr = r.cleanupProjectKubernetes(processCtx, project, namespace, fence)
+		commands, cleanupErr = r.cleanupProjectNamespaces(processCtx, project, namespace, fence)
 		return cleanupErr
 	})
 	result := &ReconcileResult{
@@ -237,11 +237,18 @@ func (r *ServiceReconciler) cleanupServiceKubernetes(ctx context.Context, projec
 	selector := "raibitserver.io/project-id=" + project.ID + ",raibitserver.io/service-id=" + service.ID
 	result, err := r.runKubectl(ctx, []string{
 		"delete", serviceDeletionResourceKinds, "--namespace", namespace, "--selector", selector,
-		"--ignore-not-found=true", "--wait=true",
+		"--ignore-not-found=true", "--wait=true", "--cascade=foreground",
 	})
 	commands := []string{result.Command}
 	if err != nil {
 		return commands, err
+	}
+	if beforeDelete != nil {
+		source, _ := r.store.(store.TemplateRuntimeSource)
+		request := TemplateRuntimeProjectionRequest{Source: source, Runner: r.runner, OutputDir: r.config.OutputDir, Kubeconfig: r.config.Kubeconfig, KubeContext: r.config.KubeContext, DryRun: r.config.DryRun, Timeout: r.config.Timeout}
+		if err := collectTemplateSecrets(ctx, request, namespace, project.ID, service.EnvironmentID, service.ID, "", beforeDelete); err != nil {
+			return commands, err
+		}
 	}
 	return commands, nil
 }

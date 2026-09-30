@@ -60,6 +60,8 @@ type Config struct {
 	Signer                             string
 	SigningKeyPath                     string
 	VerificationKeyPath                string
+	TemplateCatalogPath                string
+	TemplateBundlePath                 string
 }
 
 type Builder struct {
@@ -193,6 +195,12 @@ func New(store controlplane.Store, runner CommandRunner, config Config) *Builder
 	}
 	if config.VerificationKeyPath == "" {
 		config.VerificationKeyPath = strings.TrimSpace(os.Getenv("RAIBITSERVER_VERIFICATION_KEY"))
+	}
+	if config.TemplateCatalogPath == "" {
+		config.TemplateCatalogPath = envOr("RAIBITSERVER_TEMPLATE_CATALOG", "/opt/raibitserver/starter-catalog-v1.json")
+	}
+	if config.TemplateBundlePath == "" {
+		config.TemplateBundlePath = envOr("RAIBITSERVER_TEMPLATE_BUNDLE", "/opt/raibitserver/starter-catalog-v1.bundle.json")
 	}
 	return &Builder{Store: store, Runner: runner, Config: config}
 }
@@ -556,6 +564,9 @@ func (b *Builder) prepareSource(ctx context.Context, state *buildContext) error 
 	ctx, cancel := context.WithTimeout(ctx, b.stageTimeout(sourceStageLimit))
 	defer cancel()
 	workspace := state.WorkspaceDir
+	if strings.EqualFold(strings.TrimSpace(state.Service.SourceType), "template") {
+		return b.prepareTemplateSource(ctx, state)
+	}
 	localPath := firstNonEmpty(stringValue(state.Job.Payload["localPath"]), state.Service.LocalPath)
 	if localPath != "" {
 		sourceDir, err := b.resolveLocalSourceDir(localPath)
@@ -1073,6 +1084,13 @@ func (b *Builder) resolveImage(ctx context.Context, state *buildContext, prebuil
 		return "", err
 	}
 	commit := firstNonEmpty(state.Deployment.CommitSHA, state.Deployment.CommitHash)
+	if strings.EqualFold(strings.TrimSpace(state.Service.SourceType), "template") {
+		request, err := templateRequestFromSnapshot(state.Deployment)
+		if err != nil {
+			return "", err
+		}
+		commit = "template-" + strings.TrimPrefix(request.SourceDigest, "sha256:")
+	}
 	if commit == "" && b.Config.Production {
 		return "", errors.New("production source build requires an authoritative deployment commit")
 	}
@@ -1384,6 +1402,9 @@ func StateFileFromEnv() string {
 
 func isPrebuilt(service *controlplane.Service, deployment *controlplane.Deployment) bool {
 	source := strings.ToLower(service.SourceType)
+	if strings.TrimSpace(source) == "template" {
+		return false
+	}
 	mode := normalizeMode(service.BuildMode)
 	return source == "image" || mode == "prebuilt-image" || (service.RepoURL == "" && service.LocalPath == "" && firstNonEmpty(deployment.ImageURL, service.ImageURL, service.Image) != "")
 }

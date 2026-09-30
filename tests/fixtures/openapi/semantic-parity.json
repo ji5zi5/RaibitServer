@@ -1,5 +1,8 @@
 {
   "wireBodies": {
+    "template-installations-preflight": {"requiredProtocolVersion":2,"catalogId":"discord-bot","catalogVersion":"v1","catalogDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sourceDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","requestIdempotencyKey":"parity-template","inputs":{"DISCORD_TOKEN":"template-fixture-not-a-real-token"}},
+    "template-installations-create": {"requiredProtocolVersion":2,"catalogId":"discord-bot","catalogVersion":"v1","catalogDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sourceDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","requestIdempotencyKey":"parity-template","inputs":{"DISCORD_TOKEN":"template-fixture-not-a-real-token"}},
+    "template-installations-retry": {"requiredProtocolVersion":2,"expectedVersion":1,"requestIdempotencyKey":"parity-template-retry"},
     "discord-configure": {"webhookUrl":"https://discord.com/api/webhooks/123/fixture-not-a-real-secret","expectedVersion":0,"environments":["prod"],"events":["deployment.failed"]},
     "discord-disable": {"expectedVersion":1},
     "discord-delete": {"expectedVersion":1},
@@ -57,6 +60,12 @@
     "admin-quota-post": {"maxServices":4,"accountType":"NON_CLUB"}
   },
   "wireQueries": {
+    "templates-source":{"catalogDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sourceDigest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    "template-installations-list":{"environmentId":"environment-prod","environmentKind":"prod"},
+    "template-installations-preflight":{"environmentId":"environment-dev","environmentKind":"dev"},
+    "template-installations-create":{"environmentId":"environment-dev","environmentKind":"dev"},
+    "template-installations-get":{"environmentId":"environment-dev"},
+    "template-installations-retry":{"environmentId":"environment-dev"},
     "discord-deliveries":{"cursor":"cursor +/?","limit":2},
     "resource-backup-runs":{"limit":2},
     "auth-github-login":{"codeChallenge":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
@@ -70,6 +79,10 @@
     "github-integrations-list":{"organizationId":"organization +/?"}
   },
   "responseFixtures": [
+    {"operation":"templates-list","body":{"catalogDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","availability":{"enabled":false,"reasonCode":"TEMPLATE_UNAVAILABLE"},"starters":[]}},
+    {"operation":"template-installations-list","body":{"installations":[]}},
+    {"operation":"template-installations-preflight","body":{"projectId":"project","environmentId":"environment","environmentKind":"prod","catalogId":"fastapi","catalogVersion":"v1","services":[{"logicalSlug":"web","type":"web"}],"resources":[]}},
+    {"operation":"template-installations-create","body":{"installation":{"id":"installation","projectId":"project","environmentId":"environment","environmentKind":"prod","version":1,"catalogId":"fastapi","catalogVersion":"v1"},"progress":{"status":"building","completed":0,"total":1},"services":[{"id":"service","logicalSlug":"web","type":"web","deploymentId":"deployment"}],"resources":[]}},
     {"operation":"discord-get","body":{"configured":false}},
     {"operation":"discord-configure","body":{"id":"destination","projectId":"project","version":1,"enabled":true,"environments":["prod"],"events":["deployment.failed"],"createdAt":"2026-09-06T00:00:00.000Z","updatedAt":"2026-09-06T00:00:00.000Z","webhookConfigured":true}},
     {"operation":"discord-disable","body":{"id":"destination","projectId":"project","version":2,"enabled":false,"environments":["prod"],"events":["deployment.failed"],"createdAt":"2026-09-06T00:00:00.000Z","updatedAt":"2026-09-06T00:00:00.000Z","webhookConfigured":true}},

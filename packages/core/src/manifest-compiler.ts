@@ -161,10 +161,31 @@ function labelsFor(projectSlug: string, serviceName: string, type: string, runti
   };
 }
 
-function envRefs(plain: AnyRecord, secret: AnyRecord, secretName: string, configMapName: string): AnyRecord[] {
+function envRefs(plain: AnyRecord, secret: AnyRecord, secretName: string, configMapName: string, secretEnv: unknown = []): AnyRecord[] {
   const values = Object.keys(plain).map((key) => ({ name: key, valueFrom: { configMapKeyRef: { name: configMapName, key } } }));
   const secrets = Object.keys(secret).map((key) => ({ name: key, valueFrom: { secretKeyRef: { name: secretName, key } } }));
-  return [...values, ...secrets];
+  if (!Array.isArray(secretEnv) || secretEnv.length > 128 || (secretEnv.length && values.length + secrets.length + secretEnv.length > 128)) {
+    throw new Error('invalid service.secretEnv: expected an array with at most 128 environment values and Secret references in total');
+  }
+  const seen = new Set([...Object.keys(plain), ...Object.keys(secret)]);
+  const references = Array.from(secretEnv, (entry) => {
+    const source = entry?.valueFrom;
+    const reference = source?.secretKeyRef;
+    if (!onlyKeys(entry, ['name', 'valueFrom']) || !onlyKeys(source, ['secretKeyRef']) || !onlyKeys(reference, ['name', 'key'])
+      || typeof entry.name !== 'string' || !/^[A-Z_][A-Z0-9_]{0,127}$/.test(entry.name)
+      || typeof reference.name !== 'string' || reference.name.length > 63 || !/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(reference.name)
+      || typeof reference.key !== 'string' || !/^[A-Z_][A-Z0-9_]{0,127}$/.test(reference.key)) {
+      throw new Error('invalid service.secretEnv: expected name and valueFrom.secretKeyRef with valid name and key');
+    }
+    if (seen.has(entry.name)) throw new Error('invalid service.secretEnv: duplicate environment name');
+    seen.add(entry.name);
+    return { name: entry.name, valueFrom: { secretKeyRef: { name: reference.name, key: reference.key } } };
+  });
+  return [...values, ...secrets, ...references];
+}
+
+function onlyKeys(value: any, keys: string[]): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every((key) => keys.includes(key));
 }
 
 function containerFor(service: AnyRecord, image: string, port: number, plain: AnyRecord, secret: AnyRecord): AnyRecord {
@@ -176,7 +197,7 @@ function containerFor(service: AnyRecord, image: string, port: number, plain: An
     image,
     imagePullPolicy: 'IfNotPresent',
     ports: port ? [{ name: 'http', containerPort: port }] : [],
-    env: envRefs(plain, secret, derivedServiceObjectName(service, 'env'), derivedServiceObjectName(service, 'config')),
+    env: envRefs(plain, secret, derivedServiceObjectName(service, 'env'), derivedServiceObjectName(service, 'config'), service.secretEnv),
     command: service.command || undefined,
     args: service.args || undefined,
     resources: {

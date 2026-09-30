@@ -258,6 +258,9 @@ func (s *FileStore) ClaimNextWorkflowJob(ctx context.Context, options ClaimOptio
 		if !legacyWorkflowEnvironmentAllowed(state, candidate) {
 			continue
 		}
+		if !templateResourcesReady(state, candidate) {
+			continue
+		}
 		if workflowTargetDeleting(state, candidate) {
 			continue
 		}

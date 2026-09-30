@@ -35,6 +35,7 @@ export * from './membership-transition.ts';
 export * from './organization-create.ts';
 export * from './operational.ts';
 export * from './environment-management.ts';
+export * from './templates.ts';
 
 export const AccountTypeSchema = z.enum(['CLUB_MEMBER', 'NON_CLUB']);
 export const ApprovalStatusSchema = z.enum(['APPROVED', 'PENDING', 'REJECTED']);
